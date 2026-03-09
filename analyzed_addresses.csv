@@ -1,20 +1,287 @@
-Rank,Address,Label,Current Balance,Total Received,Total Sent,Transactions,Status,Accessibility,Type
-1,1FeexV6bAHb8ybZjqQMjJrcCrHGW9sb6uF,wallet: MtGox-Hack,79957.27 BTC,79957.27 BTC,0.00 BTC,671,Dormant,Likely Stolen/Frozen,Legacy (1...)
-2,1LdRcdxfbSnmCYYNdeYpUnztiYzVfBEQeC,,53880.07 BTC,53880.07 BTC,0.00 BTC,245,Dormant,Unspent/Lost Keys?,Legacy (1...)
-3,1AC4fMwgY8j9onSbXEWeH6Zan8QGMSdmtA,,51830.40 BTC,51830.40 BTC,0.00 BTC,159,Dormant,Unspent/Lost Keys?,Legacy (1...)
-4,12ib7dApVFvg82TXKycWBNpN8kFyiAN1dr,wallet: 967,31000.08 BTC,52700.08 BTC,21700.00 BTC,250,Spent/Active,Likely Known/Exchange,Legacy (1...)
-5,12tkqA9xSoowkzoERHMWNKsTey55YEBqkv,,28151.06 BTC,28151.06 BTC,0.00 BTC,212,Dormant,Unspent/Lost Keys?,Legacy (1...)
-6,17rm2dvb439dZqyMe2d4D6AQJSgg6yeNRn,,20008.00 BTC,20008.66 BTC,0.66 BTC,118,Spent/Active,Unknown,Legacy (1...)
-7,1PeizMg76Cf96nUQrYg8xuoZWLQozU5zGW,,19414.43 BTC,19414.43 BTC,0.00 BTC,150,Dormant,Unspent/Lost Keys?,Legacy (1...)
-8,1GR9qNz7zgtaW5HwwVpEJWMnGWhsbsieCG,,15745.56 BTC,15745.57 BTC,0.01 BTC,108,Spent/Active,Unknown,Legacy (1...)
-9,1F34duy2eeMz5mSrvFepVzy7Y1rBsnAyWC,,10770.54 BTC,10770.54 BTC,0.00 BTC,128,Dormant,Unspent/Lost Keys?,Legacy (1...)
-10,1Ki3WTEEqTLPNsN5cGTsMkL2sJ4m5mdCXT,,10000.03 BTC,10000.03 BTC,0.00 BTC,72,Dormant,Unspent/Lost Keys?,Legacy (1...)
-11,1P9fAFAsSLRmMu2P7wZ5CXDPRfLSWTy9N8,,9424.78 BTC,9424.78 BTC,0.00 BTC,61,Dormant,Unspent/Lost Keys?,Legacy (1...)
-12,1HLvaTs3zR3oev9ya7Pzp3GB9Gqfg6XYJT,,9260.02 BTC,9260.02 BTC,0.00 BTC,113,Dormant,Unspent/Lost Keys?,Legacy (1...)
-13,167ZWTT8n6s4ya8cGjqNNQjDwDGY31vmHg,,8999.01 BTC,8999.01 BTC,0.00 BTC,78,Dormant,Unspent/Lost Keys?,Legacy (1...)
-14,18zuLTKQnLjp987LdxuYvjekYnNAvXif2b,,8020.70 BTC,8020.70 BTC,0.00 BTC,50,Dormant,Unspent/Lost Keys?,Legacy (1...)
-15,3PWn1AGqo8HWH8mXSsxx1Ytk87zMAAziFU,,8000.03 BTC,8000.03 BTC,0.00 BTC,29,Dormant,Unspent/Lost Keys?,P2SH (3...)
-16,198aMn6ZYAczwrE5NvNTUMyJ5qkfy4g3Hi,,8000.01 BTC,8000.01 BTC,0.00 BTC,325,Dormant,Unspent/Lost Keys?,Legacy (1...)
-17,15Z5YJaaNSxeynvr6uW6jQZLwq3n1Hu6RX,wallet: 559,7941.07 BTC,14288.19 BTC,6347.12 BTC,138,Spent/Active,Likely Known/Exchange,Legacy (1...)
-18,13eEt6myAo1zAC7o7RK5sVxxCNCAgd6ApH,,7000.14 BTC,7000.14 BTC,0.00 BTC,31,Dormant,Unspent/Lost Keys?,Legacy (1...)
-19,1DzjE3ANaKLasY2n6e5ToJ4CQCXrvDvwsf,,7000.01 BTC,7000.01 BTC,0.00 BTC,57,Dormant,Unspent/Lost Keys?,Legacy (1...)
+Rank,Address,Label,Current Balance,Total Received,Total Sent,Transactions,First Seen,Last Seen,Status,Accessibility,Type,Vulnerability
+1,1FeexV6bAHb8ybZjqQMjJrcCrHGW9sb6uF,wallet: MtGox-Hack,79957.27 BTC,79957.27 BTC,0.00 BTC,671.0,Multiple Txs (Old),2026-03-03,Dormant,Likely Stolen/Frozen,Legacy (1...),
+2,1LdRcdxfbSnmCYYNdeYpUnztiYzVfBEQeC,,53880.07 BTC,53880.07 BTC,0.00 BTC,245.0,Multiple Txs (Old),2026-03-08,Dormant,Unspent/Lost Keys?,Legacy (1...),
+3,1AC4fMwgY8j9onSbXEWeH6Zan8QGMSdmtA,,51830.40 BTC,51830.40 BTC,0.00 BTC,159.0,Multiple Txs (Old),2026-01-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+4,12ib7dApVFvg82TXKycWBNpN8kFyiAN1dr,wallet: 967,31000.08 BTC,52700.08 BTC,21700.00 BTC,250.0,Multiple Txs (Old),2026-03-08,Spent/Active,Likely Known/Exchange,Legacy (1...),
+5,12tkqA9xSoowkzoERHMWNKsTey55YEBqkv,,28151.06 BTC,28151.06 BTC,0.00 BTC,211.0,Multiple Txs (Old),Unknown,Dormant,Unspent/Lost Keys?,Legacy (1...),
+6,17rm2dvb439dZqyMe2d4D6AQJSgg6yeNRn,,20008.00 BTC,20008.66 BTC,0.66 BTC,118.0,Multiple Txs (Old),2026-03-08,Spent/Active,Unknown,Legacy (1...),
+7,1PeizMg76Cf96nUQrYg8xuoZWLQozU5zGW,,19414.43 BTC,19414.43 BTC,0.00 BTC,150.0,Multiple Txs (Old),2026-03-08,Dormant,Unspent/Lost Keys?,Legacy (1...),
+8,1GR9qNz7zgtaW5HwwVpEJWMnGWhsbsieCG,,15745.56 BTC,15745.57 BTC,0.01 BTC,108.0,Multiple Txs (Old),2026-03-08,Spent/Active,Unknown,Legacy (1...),
+9,1F34duy2eeMz5mSrvFepVzy7Y1rBsnAyWC,,10770.54 BTC,10770.54 BTC,0.00 BTC,128.0,Multiple Txs (Old),2026-03-08,Dormant,Unspent/Lost Keys?,Legacy (1...),
+10,1Ki3WTEEqTLPNsN5cGTsMkL2sJ4m5mdCXT,,10000.03 BTC,10000.03 BTC,0.00 BTC,72.0,Multiple Txs (Old),2026-02-25,Dormant,Unspent/Lost Keys?,Legacy (1...),
+11,1P9fAFAsSLRmMu2P7wZ5CXDPRfLSWTy9N8,,9424.78 BTC,9424.78 BTC,0.00 BTC,61.0,Multiple Txs (Old),2026-02-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+12,1HLvaTs3zR3oev9ya7Pzp3GB9Gqfg6XYJT,,9260.02 BTC,9260.02 BTC,0.00 BTC,113.0,Multiple Txs (Old),2026-02-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+13,167ZWTT8n6s4ya8cGjqNNQjDwDGY31vmHg,,8999.01 BTC,8999.01 BTC,0.00 BTC,78.0,Multiple Txs (Old),2026-02-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+14,18zuLTKQnLjp987LdxuYvjekYnNAvXif2b,,8020.70 BTC,8020.70 BTC,0.00 BTC,50.0,Multiple Txs (Old),2026-01-23,Dormant,Unspent/Lost Keys?,Legacy (1...),
+15,3PWn1AGqo8HWH8mXSsxx1Ytk87zMAAziFU,,8000.03 BTC,8000.03 BTC,0.00 BTC,29.0,Multiple Txs (Old),2026-02-27,Dormant,Unspent/Lost Keys?,P2SH (3...),
+16,198aMn6ZYAczwrE5NvNTUMyJ5qkfy4g3Hi,,8000.01 BTC,8000.01 BTC,0.00 BTC,327.0,Multiple Txs (Old),2026-03-08,Dormant,Unspent/Lost Keys?,Legacy (1...),
+17,15Z5YJaaNSxeynvr6uW6jQZLwq3n1Hu6RX,wallet: 559,7941.07 BTC,14288.19 BTC,6347.12 BTC,138.0,Multiple Txs (Old),2026-02-27,Spent/Active,Likely Known/Exchange,Legacy (1...),
+18,13eEt6myAo1zAC7o7RK5sVxxCNCAgd6ApH,,7000.14 BTC,7000.14 BTC,0.00 BTC,31.0,Multiple Txs (Old),2026-01-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+19,1DzjE3ANaKLasY2n6e5ToJ4CQCXrvDvwsf,,7000.01 BTC,7000.01 BTC,0.00 BTC,57.0,Multiple Txs (Old),2026-01-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+21,1FJuzzQFVMbiMGw6JtcXefdD64amy7mSCF,,6999.00 BTC,6999.00 BTC,0.00 BTC,53.0,Multiple Txs (Old),2026-02-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+22,1Ac2JdpQ5c9NeSajdGx6dofxeXkn4S35ft,,6877.72 BTC,6877.72 BTC,0.00 BTC,35.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+23,1AYLzYN7SGu5FQLBTADBzqKm4b6Udt6Bw6,,6511.96 BTC,6511.96 BTC,0.00 BTC,38.0,Multiple Txs (Old),2026-02-02,Dormant,Unspent/Lost Keys?,Legacy (1...),
+24,1JxmKkNK1b3p7r8DDPtnNmGeLZDcgPadJb,,6315.91 BTC,6315.91 BTC,0.00 BTC,41.0,Multiple Txs (Old),2026-02-21,Dormant,Unspent/Lost Keys?,Legacy (1...),
+25,1LBBmkr9muf7RjjBbzQQvzNQpRRaVEnavs,,6200.00 BTC,6200.00 BTC,0.00 BTC,38.0,Multiple Txs (Old),2026-01-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+26,138EMxwMtKuvCEUtm4qUfT2x344TSReyiT,,5907.56 BTC,5907.56 BTC,0.00 BTC,33.0,Multiple Txs (Old),2026-01-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+27,1DR93bfKVCUJkDvPuxbUAEtzYRaJEnwjNt,,5600.00 BTC,5600.00 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+28,1CCqLR8YrUMPFgYZWwLW8FkezbFjfeXD8n,,5595.32 BTC,5595.32 BTC,0.00 BTC,31.0,Multiple Txs (Old),2026-01-30,Dormant,Unspent/Lost Keys?,Legacy (1...),
+29,1BeouDc6jtHpitvPz3gR3LQnBGb7dKRrtC,wallet: 7507428,5075.00 BTC,5195.00 BTC,120.00 BTC,132.0,Multiple Txs (Old),2026-02-11,Spent/Active,Likely Known/Exchange,Legacy (1...),
+30,1ARWCREnmdKyHgNg2c9qih8UzRr4MMQEQS,,5000.02 BTC,5000.02 BTC,0.00 BTC,42.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+31,1DaCQDfStUgkPQXcf53Teeo6LPiKcVMBM9,,5000.00 BTC,5000.00 BTC,0.00 BTC,41.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+32,19z6WynrjHeD5MMv6919BuQRwybuen1sRv,,5000.00 BTC,5000.00 BTC,0.00 BTC,39.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+33,1NQEV6T4avmPqUVTvgsKkeB6yc8qnSWfhR,,5000.00 BTC,5000.00 BTC,0.00 BTC,38.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+34,1NJQZhzYac89fDhQCmb1khdjekKNVYLFMY,,5000.00 BTC,5000.00 BTC,0.00 BTC,37.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,Legacy (1...),
+35,12ytiN9oWQTRGb6JjZiaoWMAvF9nPWdGX1,,5000.00 BTC,5000.00 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-11-30,Dormant,Unspent/Lost Keys?,Legacy (1...),
+36,1Btud1pqADgGzgBCZzxzc2b1o1ytk1HYWC,,4900.01 BTC,4900.01 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-11-10,Dormant,Unspent/Lost Keys?,Legacy (1...),
+37,1BXZng4dcXDnYNRXRgHqWjzT5RwxHHBSHo,,4900.00 BTC,4900.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+38,1BvNwfxEQwZNRmYQ3eno6e976XyxhCsRXj,,4881.14 BTC,4881.14 BTC,0.00 BTC,37.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+39,1Miy5sJZSamDZN6xcJJidp9zYxhSrpDeJm,,4792.00 BTC,4792.00 BTC,0.00 BTC,37.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+40,1Kq6hXXiSpdp9bg9hDDyqm8ZfvgZmzchjn,,4699.40 BTC,4699.40 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+41,16aEn4p6hK4FMpLtJGpoQZMZ946sDg1Z6n,,4503.26 BTC,4503.26 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+42,1MLiPwYjNACQHREFKwGtkPpWgd8PqpbuQ4,,4486.86 BTC,4486.86 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+43,18Hp8j2JMvwtPs1eqNaYEEVvuFpjQJRFVY,,4333.00 BTC,4333.00 BTC,0.00 BTC,48.0,Multiple Txs (Old),2025-11-14,Dormant,Unspent/Lost Keys?,Legacy (1...),
+44,16eb495TbiCRbRbZv4WBdaUvNGxUYJ4jed,,4322.33 BTC,4322.33 BTC,0.00 BTC,41.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+45,1JCrPqogEKEpM9fuFQV7LpF9e8cgf3YZ8m,,4251.00 BTC,8501.99 BTC,4250.99 BTC,36.0,Multiple Txs (Old),2025-10-26,Spent/Active,Unknown,Legacy (1...),
+46,124YoiaSaUssbBeP5RukbSN9Evc3UJfwPj,,4166.05 BTC,4166.05 BTC,0.00 BTC,4081.0,Multiple Txs (Old),2026-03-07,Dormant,Unspent/Lost Keys?,Legacy (1...),
+47,1GX7i8jG8DD1mG85BNnz7xybVhSmw84Uii,,4108.80 BTC,4108.80 BTC,0.00 BTC,39.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+48,1N5NqDWiLVqtU8mEzCNEeEbQVHwuGGChJs,,4049.00 BTC,4049.00 BTC,0.00 BTC,45.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+49,1VeMPNgEtQGurwjW2WsYXQaw4boAX5k6S,,4000.10 BTC,4000.10 BTC,0.00 BTC,60.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+50,1ALXLVNj7yKRU2Yki3K3yQGB5TBPof7jyo,,4000.00 BTC,4000.00 BTC,0.00 BTC,40.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+51,1LwBdypLh3WPawK1WUqGZXgs4V8neHHqb7,,4000.00 BTC,4000.00 BTC,0.00 BTC,41.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+52,1GMFSWQQQhCQyRNQcac9tDKcvqYCuripVs,,3674.21 BTC,3674.21 BTC,0.00 BTC,36.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+53,14mPMrRm6TdjqHZhd7aBUbuWt5MYWReukR,,3600.00 BTC,3600.00 BTC,0.00 BTC,41.0,Multiple Txs (Old),2025-10-26,Dormant,Unspent/Lost Keys?,Legacy (1...),
+54,1FvUkW8thcqG6HP7gAvAjcR52fR7CYodBx,wallet: 4222,3350.00 BTC,3750.00 BTC,400.00 BTC,49.0,Multiple Txs (Old),2026-02-14,Spent/Active,Likely Known/Exchange,Legacy (1...),
+55,1Gn1GzVa88T1X3fdhejyq6jrZs43T24xW6,,3248.80 BTC,3248.80 BTC,0.00 BTC,35.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+56,1PTYXwamXXgQoAhDbmUf98rY2Pg1pYXhin,,0.00 BTC,0.00 BTC,0.00 BTC,37.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+57,16oKJMcUZkDbq2tXDr9Fm2HwgBAkJPquyU,,3214.52 BTC,3214.52 BTC,0.00 BTC,35.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+58,193zge613zys7eSkQYQVd9xubovLN8Sr6j,,3144.66 BTC,3144.66 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+59,1L9ipUywwErf9EaKCgLqrkoSM5ab3wrjvh,,3140.57 BTC,3140.57 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+60,1EgH7EUfgjr8gAK9t1BeHLDC1ijrVvdec3,wallet: 1891446,3081.59 BTC,3436.17 BTC,354.58 BTC,293.0,Multiple Txs (Old),2026-02-12,Spent/Active,Likely Known/Exchange,Legacy (1...),
+61,18jGeboNHt1YpsDFcCeYPKm8qnAe9942BG,,3068.66 BTC,3068.66 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+62,19HhmfxGsznL8K7wXjZiFnhqddQucgfZzB,,3000.00 BTC,3000.00 BTC,0.00 BTC,45.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+63,15DtovKcGFiAJmyVfbjvCXHyjtyoZhyyj4,,3000.00 BTC,3000.00 BTC,0.00 BTC,36.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+64,1ArZGb5V24gAgN51FeQknobi6kNyGx739r,,3000.00 BTC,3000.00 BTC,0.00 BTC,35.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+65,1JjMoB212ctAiuDvURyWhs813yY4c75cap,,3000.00 BTC,3000.00 BTC,0.00 BTC,36.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+66,1FDVbVJYKkWPFcJEzCxi99vpKTYxEY3zdj,,3000.00 BTC,3000.00 BTC,0.00 BTC,36.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+67,1MBPNZb1Rakm8hYaP9VGqUU6gyJQUod61y,,3000.00 BTC,3000.00 BTC,0.00 BTC,25.0,2019-01-21,2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+68,1GUNPhjykrBdET5sauhahRoN6Xb9pACs5j,,3000.00 BTC,3000.00 BTC,0.00 BTC,25.0,2018-11-05,2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+69,1AGAvShyB22eUxz1DKfBBgGENDSZP8dcq9,,3000.00 BTC,3000.00 BTC,0.00 BTC,24.0,2017-08-22,2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+70,1KpwMa1w9DTUCB5asCgUdLRA22hto1Qgqv,,2998.90 BTC,4505.56 BTC,1506.66 BTC,39.0,Multiple Txs (Old),2025-10-27,Spent/Active,Unknown,Legacy (1...),
+71,1LQaq7LLoyjdfH3vczuusa17WsRokhsRvG,,2966.00 BTC,2966.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+72,15HiQkbvQMoAzXyKdQbuCKTGDxTswYBUf5,,2938.78 BTC,3008.78 BTC,69.99 BTC,31.0,Multiple Txs (Old),2025-10-27,Spent/Active,Unknown,Legacy (1...),
+73,1AenFm1zSRkhtPHwZmP2UuRQbWpakD8cVZ,,2918.00 BTC,3047.99 BTC,130.00 BTC,36.0,Multiple Txs (Old),2025-10-27,Spent/Active,Unknown,Legacy (1...),
+74,13KYdPnzGh5H8exFY3FhUo9Rvvs6kKAcL8,,2799.89 BTC,2799.89 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+75,1EUJKGm3FB65rr5W9anAEoWA3m71WpDayZ,,2744.76 BTC,2744.76 BTC,0.00 BTC,25.0,2017-04-17,2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+76,38gTej4KSrED7Ds9wTHJegErQSmSbF1Qfx,,2668.71 BTC,2668.71 BTC,0.00 BTC,38.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,P2SH (3...),
+77,18cKGtwdQHmnDXD6w6AhBhHsmxnK8gsVHf,,2645.00 BTC,2645.00 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+78,19DdkMxutkLGY67REFPLu51imfxG9CUJLD,,2615.94 BTC,2615.94 BTC,0.00 BTC,36.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+79,1BrSzBwx2RLuppgGziqgF7oMuneHQVhsNc,,2600.00 BTC,2600.00 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+80,17j45BXWrjSDttuurcSQubYLdLescJ7eJH,,2584.71 BTC,2584.71 BTC,0.00 BTC,114.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+81,1AjbEPKeyW4MCUpwb37Y1HR9uDQso67mQx,,2510.00 BTC,2510.00 BTC,0.00 BTC,25.0,2017-05-17,2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+82,1P6brDbYKsQGqRduaTMa1v8hBqJYjig4Qc,,2509.97 BTC,2509.97 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+83,1NT1jtYLNwFXLztD4U4B9sLizdYatirhWW,,2500.00 BTC,2500.00 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+84,12owkvCcMPw5u1M692GbBFmpaMdX3kqXQM,,2500.00 BTC,2500.00 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+85,1Kj6epyY2MdzZUCHE572jeV9n7DDRReaZJ,,2407.10 BTC,2408.10 BTC,1.00 BTC,35.0,Multiple Txs (Old),2025-10-27,Spent/Active,Unknown,Legacy (1...),
+86,1Q6VMUacupsVvGgSW8puCdSb65jMVpSunQ,,2369.43 BTC,2369.43 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+87,1w7TJ4AJUpnRVAFdAKfngXVEyDHRbj6Nb,,2363.04 BTC,2363.04 BTC,0.00 BTC,25.0,2017-08-04,2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+88,152p1VPp2UYceP9BLtJRLoMgoErQRCryTt,,2350.00 BTC,2350.00 BTC,0.00 BTC,74.0,Multiple Txs (Old),2025-10-27,Dormant,Unspent/Lost Keys?,Legacy (1...),
+89,1Dp1yVTFmgb6oL5WoNVsLsZso4ATMzxD1M,,2287.79 BTC,6392.28 BTC,4104.50 BTC,43.0,Multiple Txs (Old),2025-10-28,Spent/Active,Unknown,Legacy (1...),
+90,1GbkwjPrrxdXB8ddewK3KhhCXgj8uZ2Y5K,,2254.88 BTC,2254.88 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+91,1HjdiADVHew97yM8z4Vqs4iPwMyQHkkuhj,,2200.00 BTC,2200.00 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+92,1G2ozMay5PggBFMvXtFDFiXk63u2XAMsqM,,2200.00 BTC,2200.00 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+93,35ysWwjZRokHuHbDWVZnd1HA9hs6YQtHLS,,2200.00 BTC,2200.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,P2SH (3...),
+94,1LoSbcBntvcFtVAERaYTDhPB62EGkchMRQ,,2200.00 BTC,2200.00 BTC,0.00 BTC,25.0,2017-12-31,2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+95,1JaPNwMXt2AuVkWmkUHbsw78MbGorTfmm2,wallet: 4222,2194.51 BTC,4595.75 BTC,2401.24 BTC,66.0,Multiple Txs (Old),2025-10-28,Spent/Active,Likely Known/Exchange,Legacy (1...),
+96,1CounterpartyXXXXXXXXXXXXXXXUWLpVr,,2131.00 BTC,2131.00 BTC,0.00 BTC,3111.0,Multiple Txs (Old),2026-03-05,Dormant,Unspent/Lost Keys?,Legacy (1...),
+97,1VLZtmKa95BFrXHeyHEETAivJ22pTEhrT,,2100.01 BTC,2100.01 BTC,0.00 BTC,44.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+98,1NB3ZXxs3vfq1hRhuSAZ3zPdQNrXBQB6ZX,,2100.00 BTC,2100.00 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+99,13DyBwhpDw6152q1drbK2US5S3CdY1mRnU,,2100.00 BTC,2100.00 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+100,16Q5zhKCMbpEkR43K6tgzdkh1mTUfi7SMy,,2100.00 BTC,2100.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+20,324rP14bzX8kW1JWt1J8ohZjDFyt2G68Kq,,6999.99 BTC,6999.99 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-12-20,Dormant,Unspent/Lost Keys?,P2SH (3...),
+101,13ACvVSUKeQ57zBtENsJtHManPTJ5sZuRw,,2100.00 BTC,2100.00 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+102,1MEKbMf7hPw2scP468unqAXjedZWMM4La4,,2096.70 BTC,2096.70 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+103,142fFLWkLgteEB48wC6tcChK5dXkptbjn6,wallet: 20447230,2068.16 BTC,2068.16 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-28,Spent/Active,Likely Known/Exchange,Legacy (1...),
+104,1CkdZXJtpbxxX4QAzbRhiFNU3PkcsUsFzw,,2066.20 BTC,2066.20 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+105,1CU33fX35WYJDNxXM5jqawQtVGr32QEGrV,,2050.11 BTC,2050.11 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+106,1BMB272EM8F9RXaFszJ7nxxN8VNjoa3mYu,,2011.79 BTC,2011.79 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+107,1MTq53R9mvrJomvHoq8i4uyLv26mWHhNPc,,2001.33 BTC,2001.33 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+108,13dSnmhFeX3qqbsi4thXXad4ggTh6VCESG,,2000.01 BTC,2000.01 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+109,16w8WZ8Ub1Whk6SP4cw4op5cgyRVsb77T8,,2000.00 BTC,2000.00 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+110,16y2tVCgnwGM6c3kPPuQDJrSadQqcddUm6,,2000.00 BTC,2000.00 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+111,18KHS8ndbKJ1iEtTxv44Ree3Fs7oCURg83,,2000.00 BTC,2000.00 BTC,0.00 BTC,32.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+112,1KF8CrJXpAf8EB63a91EHaH1TobnDsRgaK,,2000.00 BTC,2000.00 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+113,1NTva3cWy3Xiueh5GPWCa9cz8SePrv6cmT,,2000.00 BTC,2000.00 BTC,0.00 BTC,41.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+114,13RwLs69Y7xPrTM5E2aa9RxiDSyeX6jEyw,,2000.00 BTC,2000.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+115,1KxQJau7BkuwHZh7Ugo2yoqKN9WeS51S5C,,2000.00 BTC,2000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+116,1AsgPtK6qG5M8bHxcgeVzot12gfKnUnPW9,,2000.00 BTC,2000.00 BTC,0.00 BTC,25.0,2017-08-05,2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+117,1CqMbvPpLS8mWerAHiJSS9yasZaQ9bEsZf,,2000.00 BTC,2000.00 BTC,0.00 BTC,25.0,2018-04-25,2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+118,16maYEFESxYegRrDrm8AzmhYtGdHwHnvnx,,2000.00 BTC,2000.00 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+119,12KkxkrPeSR9H1SnbKT2UPepLgarz3tGHp,,1985.68 BTC,1985.68 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+120,1ER3nEZFqXUkKw6AucHnmPxXnQQ8F6SJEG,,1969.00 BTC,1969.00 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+121,14CQ2jCrpsd1eSdC4zWsJZH9LvDr6GrCyo,,1957.55 BTC,1957.55 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+122,19rvEojniQQYqf4vGsvhPfiLMeYrag4gEe,,1925.42 BTC,4050.85 BTC,2125.42 BTC,29.0,Multiple Txs (Old),2025-10-28,Spent/Active,Unknown,Legacy (1...),
+123,1C4H9GDALbjDVnbfTt4a9ML1XbwzLS1rUC,,1908.00 BTC,1908.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+124,15HDbh92juxL9NRW4sm8wo3hmDoc32vWNM,,1861.10 BTC,1861.10 BTC,0.00 BTC,20.0,2019-02-06,2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+125,1FdPpELnjHfwSM4Nvi7LdYS4S4GVGsLUQY,wallet: 175811,1804.00 BTC,11116.23 BTC,9312.23 BTC,263.0,Multiple Txs (Old),2025-10-28,Spent/Active,Likely Known/Exchange,Legacy (1...),
+126,13HVZCHH6ndYPGYLtwdk7bH5Bv2wGzv2wK,,1800.83 BTC,1800.83 BTC,0.00 BTC,23.0,2017-08-04,2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+127,15vwE15F9Umu3aigWfFx7XKHQqVS6TyoZo,,1800.00 BTC,1800.00 BTC,0.00 BTC,25.0,2017-06-12,2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+128,1Ek9Jj3Z3Bnipe3DnMq2otXG5iNjze66VR,,1799.24 BTC,1799.24 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+129,1Go1p98x7EpKmEFiYnr4qjX6PJyxdfweJV,,1769.00 BTC,1769.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+130,1DtFKiPdYD2U6XDZGtWK7q8JYVrDKBHBqE,,1766.00 BTC,1766.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+131,13FKHnREotr4jrjiSJwPUpecogVT7Rj7bu,wallet: 4222,1750.00 BTC,4097.00 BTC,2347.00 BTC,46.0,Multiple Txs (Old),2025-10-28,Spent/Active,Likely Known/Exchange,Legacy (1...),
+132,15e8jdh1wKf3toj7yQWwuGNdMYyb6DTWE9,,1723.93 BTC,1723.93 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+133,12Eqq2YuTU5q5F7L1khsqMYzFfeU4xmjD2,,1700.00 BTC,1700.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+134,1BVMFfPXJy2TY1x6wm8gow3N5Amw4Etm5h,wallet: 1222,1698.25 BTC,31698.25 BTC,30000.00 BTC,38.0,Multiple Txs (Old),2025-10-28,Spent/Active,Likely Known/Exchange,Legacy (1...),
+135,3BjNP5gL661VmHxyw7JKUok1yGtdFenxy2,,1665.62 BTC,1665.62 BTC,0.00 BTC,23.0,2019-01-15,2025-10-28,Dormant,Unspent/Lost Keys?,P2SH (3...),
+136,1HDNfSr5ExyGfe77GX681PPZtN2deoewfd,,1662.42 BTC,37677.89 BTC,36015.47 BTC,86.0,Multiple Txs (Old),2025-10-28,Spent/Active,Unknown,Legacy (1...),
+137,162W4Sv2kJzLuzuQ52nF2oXTyfWYMH4Pxw,,1639.62 BTC,1639.62 BTC,0.00 BTC,45.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+138,113324vM6NBar2q72w6iDCdQvPnPQw8Tvw,,1600.00 BTC,1600.00 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+139,1MmcSBpzNYeGgSfVNxXEoBdpmsCxyMUuWW,,1600.00 BTC,1600.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+140,3EPqytXCCcapxe8dy6yufzLm1LXX8xmaLM,,1594.30 BTC,1594.30 BTC,0.00 BTC,23.0,2018-10-19,2025-10-28,Dormant,Unspent/Lost Keys?,P2SH (3...),
+141,1JNamaC2PE4woAk1vaoW46e5pxgdQkaKnc,,1592.00 BTC,1592.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+142,113fiz1m5ofgDnPueDXRXqyDMa8J3EirWZ,,1586.25 BTC,1586.25 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-28,Dormant,Unspent/Lost Keys?,Legacy (1...),
+143,1JqJHk69j15VAHdxUDD4hFPW8acZKoFGdS,,1558.31 BTC,1558.31 BTC,0.00 BTC,22.0,2017-08-04,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+144,1QEqQWSzrZfWsJ5Kxgh6BYnGJRjkYwMRmp,,1545.05 BTC,1545.05 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+145,1JKkR1fSQKY6qUGHdNrD9wzTavButq7AWp,,1526.11 BTC,1526.11 BTC,0.00 BTC,33.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+146,1J3St3rp3hVsuLGhegbLWicyPL3NRD3YJ7,,1523.15 BTC,1523.15 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+147,1khexYoq6fvMdKAww7dpdZb4WBPKBq2hb,,1518.00 BTC,1518.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+148,1F4N1oMNXJJRF33qcYkk58tZbEhGNH8NXN,,1501.18 BTC,1501.18 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+149,38fW4PLwRLqWKHWgE6R2i7k2P9jyACvKUc,,1500.50 BTC,1500.50 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+150,3Dq1AfreNRssqJ3uwvudULVKhaFL2hSLqU,,1500.50 BTC,1500.50 BTC,0.00 BTC,25.0,2017-11-29,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+151,1PzfwiEeLJzXHjCJXNRwDaKiDoj9sGE1sp,,1500.03 BTC,1500.03 BTC,0.00 BTC,25.0,2017-08-03,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+152,13oRbW4P5kYaSX4UXAyd5VsSYr8x5hX2Pv,,1500.00 BTC,1500.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+153,174NVbudzKV1jZnZvRzKvauZxnq25NfG4v,,1500.00 BTC,3307.65 BTC,1807.65 BTC,34.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),
+154,13byMcDPivr2fSnG1ZetpRC2gY7NiNTwJA,,1500.00 BTC,1500.00 BTC,0.00 BTC,25.0,2018-02-22,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+155,1Qj994hD27DRq2g3tL2feV3XXkffUXsMS,,1500.00 BTC,1500.00 BTC,0.00 BTC,24.0,2018-02-22,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+156,19f7nPeS4pX5u1CSYnymzMpPZx5K9gumLh,,1500.00 BTC,1500.00 BTC,0.00 BTC,22.0,2018-05-07,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+157,1Fkhvum7YANk14mQ4cRQFPXph7cHWLedXv,,1491.95 BTC,1491.95 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+158,14mYYUZJPUMgofvURnFY65YRSj1uqDzXBj,,1482.37 BTC,1482.37 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+159,14uByGebfPR3EDhA9sVvg4wXdBNbJYW753,,1441.12 BTC,1441.12 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+160,1D6iTqvbgcqenbkKNsFsi9zN21KH4KPPEa,,1434.80 BTC,1626.96 BTC,192.16 BTC,37.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),
+161,1AV4KGCsvtPZ9tG7hvwgb85wJyFd9xdpFv,,1429.63 BTC,10248.67 BTC,8819.05 BTC,471.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),
+162,1DmXZ4UWKQ2AjwLAvEK8R6vmZe5jYoFUE6,,1411.32 BTC,1411.32 BTC,0.00 BTC,25.0,2012-09-05,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+163,1NScGjCDbwKKQhrUgQVhvkiWTiqDR2GaLY,,1400.00 BTC,1400.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+164,19EXaPSKix3guorGhApd1QixkwoDsk3Wv3,,1400.00 BTC,1400.00 BTC,0.00 BTC,23.0,2017-08-01,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+165,139Gqqx4TESNaX1DAg5jRJCd3P22GGS1E1,,1398.61 BTC,1398.61 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+166,1JqdadgxgxrnbEnfvohxtaSNbHt52kVLtC,,1396.45 BTC,1396.45 BTC,0.00 BTC,3485.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+167,3CXqwPMeRSZfAcXcw8h5xcv2QgxVP94cs8,,1394.39 BTC,1394.39 BTC,0.00 BTC,21.0,2019-01-15,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+168,35tR8soky58TuUo1dKrT7RTsRc8SWCAZMk,,1391.88 BTC,1391.88 BTC,0.00 BTC,23.0,2017-09-06,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+169,1Nc5Vpkk3qhFHzwrvHedr5uBB6ELSMuSmB,,1382.98 BTC,1382.98 BTC,0.00 BTC,24.0,2017-02-24,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+170,1K4VSNMNqnmngpTXdny8a6xj9cfvyTtFfV,,1380.61 BTC,1380.61 BTC,0.00 BTC,303.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+171,14ResTzJYh5t9xDqtEsgCfXNjaWNSuA5uQ,,1364.19 BTC,1756.76 BTC,392.57 BTC,39.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),
+172,16QdwpazhZ2FnqiB5UauW7vRFqQjNBH7u3,,1360.06 BTC,1360.06 BTC,0.00 BTC,25.0,2015-12-18,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+173,1GRg4w3SEp3D5HgJejyasQtD6UyTyrtAqL,,1350.00 BTC,1350.00 BTC,0.00 BTC,22.0,2018-01-31,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+174,3KFumSNurzdgfsKzeLVC4CvsiepdBXwQEd,,1347.46 BTC,1347.46 BTC,0.00 BTC,21.0,2019-01-15,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+175,1HW3Wa63msqwhrBYCAsddMGh1gWXABXWyV,,1336.93 BTC,1336.93 BTC,0.00 BTC,22.0,2018-02-23,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+176,1GkqY6YQB6WKC9Hjh8oP8yojDufDYRCXkq,,1336.22 BTC,1336.22 BTC,0.00 BTC,47.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+177,194RLDTv6rjkDu9kX99mTBuK6KunAWRRkk,,1335.00 BTC,1525.00 BTC,190.00 BTC,80.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),
+178,1BgHppcDjzMYbfeJR23VHHbAFHUNunxAze,,1327.00 BTC,1327.00 BTC,0.00 BTC,22.0,2015-08-25,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+179,1Dq9aaxg3DJ6rXfhKE5jKYQmcK3SBuYy74,,1325.99 BTC,1325.99 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+180,13kxWCuDWN1gGSe2vPmsSBVXyPfYLMh6M4,wallet: 10513851,1320.32 BTC,2983.46 BTC,1663.15 BTC,1195.0,Multiple Txs (Old),2025-10-29,Spent/Active,Likely Known/Exchange,Legacy (1...),
+181,15aKbxrQCJDEemv8LBeqE5mX6JikdporrZ,,1312.41 BTC,1312.41 BTC,0.00 BTC,38.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+182,1FUGUiJFcsLktTAkexy2ghT3Kus7yyEuUJ,wallet: 821090,1303.39 BTC,3146.26 BTC,1842.86 BTC,57.0,Multiple Txs (Old),2025-10-29,Spent/Active,Likely Known/Exchange,Legacy (1...),
+183,152kzDqjAVuPBMmJqcWvFbB7qkvigFXSLh,wallet: 28112415,1301.42 BTC,2041.48 BTC,740.06 BTC,665.0,Multiple Txs (Old),2025-10-29,Spent/Active,Likely Known/Exchange,Legacy (1...),
+184,19xjndVpGTqmFAC1ZL3gV6MpxJUMkvqSrd,,1300.00 BTC,4331.00 BTC,3031.00 BTC,42.0,Multiple Txs (Old),2026-01-19,Spent/Active,Unknown,Legacy (1...),
+185,12bFfEEyw8MwT2oan8Tv99Cw15kYKL6aiJ,,1300.00 BTC,1300.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+186,1F6aQVRg1aWB5K63fNcaA79o9Xoik27GM,,1300.00 BTC,1300.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+187,372o41UryrDe4XuxgkagbByyVhH9niaGFu,,1300.00 BTC,1300.00 BTC,0.00 BTC,22.0,2019-01-15,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+188,3Lhf1HGi3PjMQzgR5tU1J6MEwnZqWfA4QM,,1299.99 BTC,1299.99 BTC,0.00 BTC,24.0,2017-12-05,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+189,1BmU4dAJAKEaDuj3Eswc66UxjbHWdVWu4F,,1294.00 BTC,1294.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+190,1KjjyBY36xDfaNZ7KqJxc1sQ9APESCXH21,,1260.78 BTC,1260.78 BTC,0.00 BTC,24.0,2016-07-09,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+191,1Y6Lr71Htj7vwsG1mo5un9WBigrHcdAGH,,1244.31 BTC,1244.31 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+192,18iJBAX3BRVZT2i5vkh73TUM9UvAN1ASE3,,1236.10 BTC,1236.10 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+193,15eSCVaJFFXbFitzNxWwUUCEwpS2dkZK2G,,1208.90 BTC,1254.90 BTC,46.00 BTC,33.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),
+194,1BBpy9Vh2gp78XMsdd8F2bYLtdtAfpsKji,,1207.43 BTC,1207.43 BTC,0.00 BTC,25.0,2017-02-24,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+195,165JPvFVSTLqV8seGzY7mumNpzysVSoTKc,,1206.35 BTC,1206.35 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+196,3MTHTYTQeCZUeBD82ArdpJ65ctAhBBWi7C,,1204.94 BTC,1204.94 BTC,0.00 BTC,21.0,2019-01-15,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),
+197,1APMXEM4SUeR9WBwvUVjAponH9vzeG2fjp,,1201.00 BTC,1201.00 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+198,1MVLP2kRPNqz8VJUy83LstUoMQzUjgq4Zg,,1200.65 BTC,1200.65 BTC,0.00 BTC,44.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+199,1B2KQvEL2wyWiBmxg5rNbHCU4zQmGDgiwH,,1200.00 BTC,1200.00 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+200,14aHSA3xnNpBYyqqZvLbTvrBYELbJhn7NL,,1200.00 BTC,1200.00 BTC,0.00 BTC,25.0,2016-04-17,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+201,1EaChfhakuSdYdNekHZB8YHe6SdykVg8pu,,1193.65 BTC,1193.65 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),
+202,17kPKTWpDKgDES6RT11Xuz2qgyLNBsDrgu,,1191.13 BTC,1191.14 BTC,0.01 BTC,28.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),None
+203,1FHJmaZ46UsX6gZzaQQqduA5xcCcsCLcYj,,1182.00 BTC,1182.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+204,1k7rio1YLfhN2JfaAsmsy3PT2oUdqiy8J,,1182.00 BTC,1182.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+205,14E4jGeo7Gys3DvQThT9AiEq3yvmcpRZ27,,1170.00 BTC,1170.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+206,16xSAf5uYCrEgTfXxjrUgq9c5qSjZowSCa,,1150.00 BTC,1164.07 BTC,14.07 BTC,37.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),None
+207,1GUT2NzCgVsjZj1DsBycCGXntoTTWjTiMG,,1142.33 BTC,1142.33 BTC,0.00 BTC,25.0,2017-09-07,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+208,19NNyVDVqco5PRVZRqt9i7ECAP6CuyLZu4,,1140.89 BTC,1140.89 BTC,0.00 BTC,25.0,2017-09-06,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+209,1DowZxD3BVK4EBqWoD6QaES8t277hgmWDv,,1137.47 BTC,1187.47 BTC,50.00 BTC,32.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),None
+210,1Fyhd6BWJh6fAtC6rHu19K8FFx5a4aRaXH,,1120.04 BTC,1120.04 BTC,0.00 BTC,25.0,2018-09-17,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+211,3MPaGxZfDKxu8srq5HSVtVjZ6SZcVgSBHM,,1111.34 BTC,1111.34 BTC,0.00 BTC,35.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),None
+212,1N5ACP9k2wRUgC3siFRu45MoR9Xkvb6Wmc,,1111.00 BTC,1111.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+213,12yqUYtcCvDgiDgzJTT7DsSCoSifwYavhH,wallet: 779574,1105.00 BTC,1860.00 BTC,755.00 BTC,81.0,Multiple Txs (Old),2025-10-29,Spent/Active,Likely Known/Exchange,Legacy (1...),None
+214,1Dd3QKnvAZC17SvguLq8aoi8JLtQfr532P,,1100.10 BTC,1100.10 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+215,15USWMmGtSHnnkmcJBrwYrAjtjBg6i4N8w,,1100.00 BTC,3100.00 BTC,2000.00 BTC,51.0,Multiple Txs (Old),2025-10-29,Spent/Active,Unknown,Legacy (1...),None
+216,1AJuVk99ygzUoXZiAbBRnSaCMqB5QUJEsn,,1100.00 BTC,1100.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+217,1KmaiBSWEwmLcmq1TZzEJqwvmchS6t2n3E,wallet: 30007,1093.21 BTC,1094.67 BTC,1.46 BTC,35.0,Multiple Txs (Old),2025-10-29,Spent/Active,Likely Known/Exchange,Legacy (1...),None
+218,1Nq8XVK1ocaBiL6ZswrDPmuqeZixXkFWEU,,1055.15 BTC,1055.15 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+219,3LvjVpxwsDikf4AbZmEJXWq6hNNoorSJFq,,1051.56 BTC,1051.56 BTC,0.00 BTC,25.0,2019-01-16,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),None
+220,1khUbG5x5irP5S8oaDDdNHZffymb5bpXu,,1049.01 BTC,1049.01 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+221,1D4PtqZ8gdX8cBR8VgLSnC53c1tGL9wopJ,,1036.03 BTC,1036.03 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+222,1KNxYaLy5HGZmKGH8NzJzUVhomHg84d2y2,,1032.61 BTC,1032.61 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+223,14g9K1s4SpV8k2CtwTNJt1JWoHSyXG4JWj,,1024.49 BTC,1024.49 BTC,0.00 BTC,25.0,2018-03-01,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+224,1AyB2Ff33WjN8HyFHGa6UnEypDTnexiuVM,,1023.24 BTC,1023.24 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+225,1NxmQpXZD7yzXrTKdTBPGyVa9CphKb4i8t,,1020.10 BTC,1020.10 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+226,1khWP41zrADdWSNwzXQUZGpURPgXHTaux,,1010.00 BTC,1010.00 BTC,0.00 BTC,26.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+227,1FyGxvtPXCniSqivesC7DwMsKw49KrnU79,,1005.00 BTC,1005.00 BTC,0.00 BTC,25.0,2017-11-07,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+228,1FSqgEhG4bEzTDLNxfeQ7hLz9E93TRhczn,,1004.77 BTC,1004.77 BTC,0.00 BTC,25.0,2017-12-22,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+229,112P9ju5uTvvj5JZ6H3SNRy6mqxsXVnB9K,,1003.65 BTC,1003.65 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+230,1khbFxF6n3oDyMHGhBWjpQZE8TFoVYtSE,,1003.00 BTC,1003.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+231,37UTf3ruv5csr4CWGag2VCqgvenr2YzHV8,,1003.00 BTC,1003.00 BTC,0.00 BTC,24.0,2018-07-20,2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),None
+232,14WeToVbjbByAUD8GGHRU9BJGwETBFLPKT,,1001.25 BTC,1001.25 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+233,14qdBdRTvT4i4QZ6iqRhrBj732x9EpoFQC,,1001.01 BTC,1001.01 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+234,1A6VXviu1guRweCkJiLQy3h9hzfoLawp5d,,1000.82 BTC,1000.82 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+235,3AVaHvreEHRuvtbmrfst9ypuZ4TPP5vpPj,,1000.50 BTC,1000.50 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,P2SH (3...),None
+236,1Au1PEH71fsKfhgHSGN77CmH9tVmURriAY,,1000.23 BTC,1000.23 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+237,1nJ39zzTMJCygGxw3PZXKydSk7mNnC7SQ,,1000.00 BTC,1000.00 BTC,0.00 BTC,23.0,2018-08-25,2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+238,18xjbYXKfohTNrX41g1GAzzjh1sjJPzRqd,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-12-27,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+239,1PmLAqBiiCTpq6hc8BJ3wa8hJtyjNPdvHE,,1000.00 BTC,1000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+240,1EqGWHKPrJZzLzUFTULLA3caYnQv53wQJP,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-29,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+241,1AwpCykpTxiNhu6eTH62YcXVfBEcTM4Sai,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+242,12zgpEbXRs9JzXRckvdkQFfu99jn521Dfi,,1000.00 BTC,1000.00 BTC,0.00 BTC,34.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+243,1Dg5eLjUu8tp5Rhkq1iG9XNPoryrPLQA15,,1000.00 BTC,1000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+244,1Ab1BCNuYwGtfDKgJWh81zbeyB7HWNc9xJ,,1000.00 BTC,1000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+245,1D4c6FjVrim1jppRWy1DNLjrx4uogZBwkJ,,1000.00 BTC,1000.00 BTC,0.00 BTC,24.0,2018-08-19,2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+246,1JecCTLDLgo7wEZrsYpUFLSZEpi6DJPK7d,,1000.00 BTC,1000.00 BTC,0.00 BTC,22.0,2018-08-26,2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+247,155AkfuHgY7mZFDm9d7xGgP1rqXHMtjukY,wallet: 38600897,1000.00 BTC,1000.00 BTC,0.00 BTC,19.0,2018-03-23,2025-10-30,Spent/Active,Likely Known/Exchange,Legacy (1...),None
+248,1Mnc9YWgfSyyut8wdKDNznYhi2NvYnsqCw,,1000.00 BTC,2000.00 BTC,1000.00 BTC,34.0,Multiple Txs (Old),2025-10-30,Spent/Active,Unknown,Legacy (1...),None
+249,1DFxKaDmq1cuzLjo949quvWqPA3UVu3hP7,,1000.00 BTC,1000.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+250,1H1ECjR96iAiTpiVaooQwcV9JHxf57vg2m,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-12-21,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+251,1LcKmgPFaXpJui5LMbaogk7A88kwdJK9Rg,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+252,16hr6GDzWvBrkhSg5337jTrUnrs7Z9GdS9,,1000.00 BTC,1000.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+253,16TkpJm34XjeVdZZckTWAn1dqYbX5v7K4a,,1000.00 BTC,1000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+254,13aNpzpiRe2VfupbroMWv68Q2VbJrnWdXP,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+255,14WWrJMGPo43mAoLXoH53pREAEUAFFW66T,,1000.00 BTC,1000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2026-02-09,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+256,1Au1fALPbBY4qA1YRPUC9GBKm8gAZJ1CCN,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+257,1uU9y4LSM3vKrD4R2iQqhMa1kW6d3kKUk,,1000.00 BTC,1000.00 BTC,0.00 BTC,24.0,2015-12-11,2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+258,1Dbvh6L8Ce22bnfe4uMVqXZb19ift8ohqx,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+259,12dvRka7H1AydknnwqdsX9trXHbNZFzE57,,1000.00 BTC,1000.00 BTC,0.00 BTC,31.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+260,1L9oHjwBs5VVtrKFT6gXMAwqdobfhMZaWF,,1000.00 BTC,1000.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+261,1KiQNazvLpchWb8rZx3VqhyaE56PXxcuYB,,1000.00 BTC,1000.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2026-02-14,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+262,1KVyYVs7qbzuZt4s6M1hKRwtQZm2QQZLiA,wallet: 53630,1000.00 BTC,1000.08 BTC,0.08 BTC,36.0,Multiple Txs (Old),2025-10-30,Spent/Active,Likely Known/Exchange,Legacy (1...),None
+263,14xWSU6vrV7H285PR96pGtvqg6XLfycSt4,,1000.00 BTC,1000.00 BTC,0.00 BTC,30.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+264,1BNSd5s2wUm48PwVkf8CUYKabhM4iiHPmx,,1000.00 BTC,1000.00 BTC,0.00 BTC,29.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+265,1B8C6LkjpQHg6PnHzujfg3ujZ7Z3C9pEqW,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+266,14SvnRSkHckB4NCFSNETgs7wbbwx2iN2HU,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+267,1Mz9MJ3Tvm8vjZrdTDXSoJrL54uUGjh459,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+268,1H5hXypTRciskxVC5nPGEF6Cw24F1AzC4,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+269,19C5VdmSD3SF8f7Che4t2hxHHWPjKPGegt,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+270,19GxhCCB59ZYYSTGSFrd5imG6wPWbhd4zr,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+271,1PNwELxYci8bcMn3D9JBpqoANXuHTZ88YM,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+272,1Atpo8TGJPkUtLreMrKzCGUUrxcYBHafA4,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+273,1QFET85uxFHhud5T8RVYp8hzCbdfYHvz6x,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+274,1CSXJ4kB7Y9hp3MVHSs7qbzsF3xuFcQLXK,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+275,17pE1V6ZgNyPwsYtXaR1tJuZvvtcry8ukt,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+276,1AbVjHyy52HpaHC9RCiSFszXzgPEhHcQqj,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+277,1G6jwPp5dGbzmdvyX98REt4X7moBYME3qy,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+278,1DMfS71RmW7961TowcM4WPQpMoTfZnjbgR,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+279,17FPdPcc86QEfqoVuSBoc6khJDqS9qZUFw,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+280,1BrpK5VRnWb5mVaNATXy5Cf8jjUHqF3pvy,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+281,12iPz6KzKGX1UyodPsvKeigbsAkpGKKPNW,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+282,1MJ7uvPRVc7GN3AUHvtQmUUE4S1m81EDxw,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+283,1ECE8LSkmUDPYNAkysCJTzbQePunxdX2kj,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+284,1AWe32boSBj88Uxvdu4nnVZffZ3oPeLits,,1000.00 BTC,1000.00 BTC,0.00 BTC,28.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
+285,1JaVPjPHZgrBBwS3XW1w4KFUZFwvuAwtVV,wallet: 1130554,1000.00 BTC,1100.00 BTC,100.00 BTC,29.0,Multiple Txs (Old),2025-10-30,Spent/Active,Likely Known/Exchange,Legacy (1...),None
+286,13N2qrZj54B8HrhKR65aneA3Cj2AE8XE7G,,1000.00 BTC,1000.00 BTC,0.00 BTC,27.0,Multiple Txs (Old),2025-10-30,Dormant,Unspent/Lost Keys?,Legacy (1...),None
