@@ -1,0 +1,4 @@
+dormant_btc.html
+__pycache__/
+*.pyc
+.env
