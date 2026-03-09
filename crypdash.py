@@ -33,7 +33,8 @@ def get_stats():
     return {
         "Total": db_stats['total'],
         "Analyzed": db_stats['analyzed'],
-        "Dormant": db_stats['dormant']
+        "Dormant": db_stats['dormant'],
+        "Recovered": db_stats['keys_recovered']
     }
 
 def get_potential_targets():
@@ -46,7 +47,7 @@ def get_potential_targets():
                CASE WHEN potential_weakness != 'None Identified' THEN potential_weakness ELSE accessibility END as reason
         FROM addresses
         WHERE accessibility = 'Unspent/Lost Keys?' OR potential_weakness != 'None Identified'
-        ORDER BY rank ASC
+        ORDER BY bal DESC
         LIMIT 20
         '''
         cursor.execute(query)
@@ -62,12 +63,31 @@ def get_potential_targets():
         targets.append({"Address": "Error", "Balance": "N/A", "Reason": str(e)})
     return targets
 
+def get_recovered_keys():
+    keys = []
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT address, privkey_hex, method FROM recovered_keys ORDER BY id DESC LIMIT 20")
+        rows = c.fetchall()
+        for r in rows:
+            keys.append({
+                "Address": r[0],
+                "Key": r[1][:26] + "..." if r[1] else "Unknown",
+                "Method": r[2]
+            })
+        conn.close()
+    except Exception as e:
+        keys.append({"Address": "Error", "Key": "N/A", "Method": str(e)})
+    return keys
+
 def send_signal(sig):
     with open(SIGNAL_FILE, 'w') as f:
         f.write(sig)
 
 def start_service():
-    subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Execute detached
+    subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 def reset_analysis():
     try:
@@ -86,11 +106,13 @@ def draw_dashboard(stdscr):
     stdscr.timeout(1000)
     
     curses.start_color()
-    curses.init_pair(1, curses.COLOR_GREEN, curses.COLOR_BLACK) # Running
-    curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)   # Stopped
-    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK) # Warning
-    curses.init_pair(4, curses.COLOR_CYAN, curses.COLOR_BLACK)  # Info
-    curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE)   # Log Header
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_GREEN, -1)   # Running
+    curses.init_pair(2, curses.COLOR_RED, -1)     # Stopped
+    curses.init_pair(3, curses.COLOR_YELLOW, -1)  # Warning
+    curses.init_pair(4, curses.COLOR_CYAN, -1)    # Info
+    curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE) # Log Header
+    curses.init_pair(6, curses.COLOR_MAGENTA, -1) # Keys found
 
     mode = "MAIN" 
 
@@ -121,21 +143,22 @@ def draw_dashboard(stdscr):
             stdscr.addstr(6, 4, f"Total Addresses Tracked: {stats['Total']}")
             stdscr.addstr(7, 4, f"Addresses Analyzed:      {stats['Analyzed']}")
             stdscr.addstr(8, 4, f"Dormant Targets:         {stats['Dormant']}")
+            stdscr.addstr(9, 4, f"Keys Recovered:          {stats['Recovered']}", curses.color_pair(1) if stats['Recovered']>0 else curses.A_NORMAL)
             
             if stats['Total'] > 0:
                 percent = (stats['Analyzed'] / stats['Total']) * 100
                 bar_len = min(width - 20, 50)
                 filled = int((percent / 100) * bar_len)
                 bar = "[" + "=" * filled + " " * (bar_len - filled) + "]"
-                stdscr.addstr(10, 4, f"Progress: {bar} {percent:.1f}%")
+                stdscr.addstr(11, 4, f"Progress: {bar} {percent:.1f}%")
             
             cpu_val = info.get('cpu_usage', 0)
             ram_val = info.get('ram_usage', 0)
-            stdscr.addstr(12, 2, "System Constraints:", curses.A_UNDERLINE)
-            stdscr.addstr(13, 4, f"CPU Load: {cpu_val}%")
-            stdscr.addstr(14, 4, f"RAM Use:  {ram_val}%")
+            stdscr.addstr(13, 2, "System Constraints:", curses.A_UNDERLINE)
+            stdscr.addstr(14, 4, f"CPU Load: {cpu_val}%")
+            stdscr.addstr(15, 4, f"RAM Use:  {ram_val}%")
             
-            controls = "[S] Start | [T] Stop | [R] Restart | [A] Re-Analyze | [P] Potential | [Q] Quit"
+            controls = "[S] Start | [T] Stop | [R] Restart | [A] Re-Analyze | [P] Potential | [K] Keys | [Q] Quit"
             stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)
 
         elif mode == "POTENTIAL":
@@ -144,22 +167,38 @@ def draw_dashboard(stdscr):
             if not targets:
                 stdscr.addstr(4, 4, "No targets identified yet.")
             else:
-                stdscr.addstr(4, 4, f"{'Address':<40} {'Balance':<15} {'Reason'}")
+                stdscr.addstr(4, 4, f"{'Address':<35} {'Balance':<15} {'Reason'}")
                 stdscr.addstr(5, 4, "-" * (width - 8))
                 for i, target in enumerate(targets):
                     if i + 6 >= height - 12: break # Leave room for logs
-                    stdscr.addstr(i + 6, 4, f"{target['Address']:<40} {target['Balance']:<15} {target['Reason']}")
+                    stdscr.addstr(i + 6, 4, f"{target['Address'][:34]:<35} {target['Balance']:<15} {target['Reason'][:30]}")
             
-            controls = "[B] Back to Main | [A] Re-Analyze | [Q] Quit"
+            controls = "[B] Back to Main | [Q] Quit"
             stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)
 
-        # LIVE LOG PANE (Visible in both modes)
-        log_start_y = height - 12
-        stdscr.addstr(log_start_y, 2, " Live Activity Log ", curses.color_pair(5) | curses.A_BOLD)
-        log_msgs = info.get('logs', [])
-        for i, msg in enumerate(log_msgs):
-            if log_start_y + 1 + i < height - 2:
-                stdscr.addstr(log_start_y + 1 + i, 4, msg[:width-6])
+        elif mode == "KEYS":
+            stdscr.addstr(2, 2, "RECOVERED KEYS (SUCCESS!):", curses.A_UNDERLINE | curses.color_pair(1))
+            keys = get_recovered_keys()
+            if not keys:
+                stdscr.addstr(4, 4, "No keys recovered yet. Keep scanning...", curses.color_pair(3))
+            else:
+                stdscr.addstr(4, 4, f"{'Address':<35} {'Private Key':<30} {'Method'}")
+                stdscr.addstr(5, 4, "-" * (width - 8))
+                for i, k in enumerate(keys):
+                    if i + 6 >= height - 12: break
+                    stdscr.addstr(i + 6, 4, f"{k['Address'][:34]:<35} {k['Key'][:29]:<30} {k['Method'][:25]}", curses.color_pair(1))
+            
+            controls = "[B] Back to Main | [Q] Quit"
+            stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)
+
+        # LIVE LOG PANE (Visible in all modes)
+        log_start_y = height - 10
+        if log_start_y > 10:  # Ensures screen is tall enough for logs
+            stdscr.addstr(log_start_y, 2, " Live Activity Log ", curses.color_pair(5) | curses.A_BOLD)
+            log_msgs = info.get('logs', [])
+            for i, msg in enumerate(log_msgs):
+                if log_start_y + 1 + i < height - 2:
+                    stdscr.addstr(log_start_y + 1 + i, 4, msg[:width-6])
 
         stdscr.refresh()
         
@@ -170,11 +209,12 @@ def draw_dashboard(stdscr):
         elif c == ord('t') or c == ord('T'): send_signal('STOP')
         elif c == ord('r') or c == ord('R'):
             send_signal('STOP')
-            time.sleep(1)
+            time.sleep(1.5)
             start_service()
         elif c == ord('a') or c == ord('A'):
             reset_analysis()
         elif c == ord('p') or c == ord('P'): mode = "POTENTIAL"
+        elif c == ord('k') or c == ord('K'): mode = "KEYS"
         elif c == ord('b') or c == ord('B'): mode = "MAIN"
 
 if __name__ == "__main__":
