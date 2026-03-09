@@ -33,29 +33,31 @@ def service_log(message):
         log_buffer.pop(0)
 
 def get_system_stats():
+    cpu_usage = 0.0
+    ram_usage = 0.0
+    try:
+        import psutil
+        cpu_usage = psutil.cpu_percent(interval=0.1)
+        ram_usage = psutil.virtual_memory().percent
+        return cpu_usage, ram_usage
+    except ImportError:
+        pass
+    # Fallback: Linux-specific
     try:
         load1, _, _ = os.getloadavg()
         num_cpus = os.cpu_count() or 1
         cpu_usage = (load1 / num_cpus) * 100
     except:
-        cpu_usage = 0.0
-
-    ram_usage = 0.0
+        pass
     try:
         with open('/proc/meminfo', 'r') as f:
             meminfo = {}
             for line in f:
                 parts = line.split(':')
                 if len(parts) == 2:
-                    name = parts[0].strip()
-                    value = parts[1].split()[0].strip()
-                    meminfo[name] = int(value)
-            
+                    meminfo[parts[0].strip()] = int(parts[1].split()[0])
             total = meminfo.get('MemTotal', 1)
-            free = meminfo.get('MemFree', 0)
-            buffers = meminfo.get('Buffers', 0)
-            cached = meminfo.get('Cached', 0)
-            used = total - free - buffers - cached
+            used = total - meminfo.get('MemFree', 0) - meminfo.get('Buffers', 0) - meminfo.get('Cached', 0)
             ram_usage = (used / total) * 100
     except:
         pass

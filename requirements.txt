@@ -3,3 +3,5 @@ beautifulsoup4
 pandas
 ecdsa
 base58
+psutil
+mpmath

