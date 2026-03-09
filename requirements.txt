@@ -5,3 +5,7 @@ ecdsa
 base58
 psutil
 mpmath
+mnemonic
+bip32utils
+scikit-learn
+torch
