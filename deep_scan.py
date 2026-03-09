@@ -42,7 +42,7 @@ def get_targets(min_sigs_needed=2, limit=50):
     return rows
 
 def extract_sigs_for_address(address, existing_count=0, max_sigs=256):
-    """Extract signatures for an address, skipping if we already have enough."""
+    """Extract signatures for an address using all available API sources."""
     needed = max_sigs - existing_count
     if needed <= 0:
         return existing_count
@@ -55,12 +55,29 @@ def extract_sigs_for_address(address, existing_count=0, max_sigs=256):
             total = existing_count + len(sigs)
             print(f"  Got {len(sigs)} new sigs (total: {total})")
             return total
-        else:
-            print(f"  No spending transactions found")
-            return existing_count
     except Exception as e:
-        print(f"  Error: {e}")
-        return existing_count
+        print(f"  Mempool error: {e}")
+    
+    # Fallback: try multi-source API for deeper history
+    try:
+        from api_client import api
+        from tx_preimage_reconstructor import extract_sigs_from_txids
+        
+        print(f"  Trying alternative sources for {address}...")
+        txids = api.get_address_txids(address, max_txs=200)
+        if txids:
+            print(f"  Found {len(txids)} TXIDs via alternative source")
+            sigs = extract_sigs_from_txids(address, txids, max_sigs=needed)
+            if sigs:
+                save_signatures(address, sigs)
+                total = existing_count + len(sigs)
+                print(f"  Got {len(sigs)} new sigs (total: {total})")
+                return total
+    except Exception as e:
+        print(f"  Fallback API error: {e}")
+    
+    print(f"  No spending transactions found")
+    return existing_count
 
 def check_r_reuse(address):
     """Check for R-reuse with different Z values (instant key recovery)."""
