@@ -131,8 +131,9 @@ def find_lattice_targets(address):
             sigs_count = 0
             for tx in txs:
                 for vin in tx.get('vin', []):
-                    if vin.get('scriptsig') or vin.get('witness'):
-                        sigs_count += 1
+                    if vin.get('prevout', {}).get('scriptpubkey_address') == address:
+                        if vin.get('scriptsig') or vin.get('witness'):
+                            sigs_count += 1
             if sigs_count >= 2:
                 service_log(f"Lattice Target Found: {address} ({sigs_count} sigs)")
                 add_finding(address, 'Lattice Target', details=f"Signatures count: {sigs_count}", severity='Medium')

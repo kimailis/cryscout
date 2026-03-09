@@ -165,13 +165,17 @@ def extract_sigs_from_txids(address, txids, max_sigs=256):
                 
                 r_val, s_val = parse_der(sig_hex)
                 if r_val and s_val:
-                    print(f"Calculating REAL Z for {txid} input {i}...")
+                    # Avoid duplicates
+                    if any(s['txid'] == txid and s['r'] == r_val for s in full_data):
+                        continue
+                        
+                    print(f"[{len(full_data)}] Calculating REAL Z for {txid} input {i}...")
                     real_z = get_real_z(txid, i)
                     if real_z:
                         full_data.append({'r': r_val, 's': s_val, 'z': real_z, 'txid': txid})
     return full_data
 
-def extract_sigs_with_real_z(address, max_pages=100):
+def extract_sigs_with_real_z(address, max_pages=100, max_sigs=256):
     last_txid = None
     all_spending_txids = []
     for page in range(max_pages):
@@ -187,10 +191,10 @@ def extract_sigs_with_real_z(address, max_pages=100):
                     all_spending_txids.append(tx['txid'])
                     break
             last_txid = tx['txid']
-        if len(all_spending_txids) >= 256: break
-        time.sleep(0.5)
+        if len(all_spending_txids) >= max_sigs * 2: break # Fetch more txids to ensure we get enough sigs
+        time.sleep(0.1)
     if not all_spending_txids: return []
-    return extract_sigs_from_txids(address, all_spending_txids, max_sigs=256)
+    return extract_sigs_from_txids(address, all_spending_txids, max_sigs=max_sigs)
 
 if __name__ == "__main__":
     # Test with SegWit address from extract_tx_sigs_v2.py
