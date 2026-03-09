@@ -55,9 +55,11 @@ def master_scan():
             
         # 5. Try LSB Bias (Lattice HNP)
         # Fetch known bias from DB if available
-        cursor = conn.cursor()
-        cursor.execute("SELECT details FROM vulnerabilities WHERE address = ? AND type = 'LSB Bias' ORDER BY id DESC LIMIT 1", (addr,))
-        bias_row = cursor.fetchone()
+        conn2 = get_connection()
+        cursor2 = conn2.cursor()
+        cursor2.execute("SELECT details FROM vulnerabilities WHERE address = ? AND type = 'LSB Bias' ORDER BY id DESC LIMIT 1", (addr,))
+        bias_row = cursor2.fetchone()
+        conn2.close()
         bias_val = 0
         if bias_row:
             try:
