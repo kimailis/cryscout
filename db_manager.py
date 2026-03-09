@@ -54,7 +54,7 @@ def init_db():
         r_bits INTEGER,
         is_biased BOOLEAN,
         found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (address) REFERENCES addresses (address)
+        UNIQUE(address, txid, vin, r_hex, s_hex)
     )
     ''')
     
@@ -147,6 +147,93 @@ def get_stats():
     
     conn.close()
     return stats
+
+def save_signatures(address, sigs_list):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    for sig in sigs_list:
+        r_int = str(sig['r'])
+        s_int = str(sig['s'])
+        z_int = str(sig['z'])
+        r_hex = hex(sig['r'])[2:].zfill(64)
+        s_hex = hex(sig['s'])[2:].zfill(64)
+        z_hex = hex(sig['z'])[2:].zfill(64)
+        txid = sig['txid']
+        vin = sig.get('vin', 0)
+        pubkey = sig.get('pubkey', '')
+        
+        # Calculate r_bits (useful for bias detection)
+        r_bits = sig['r'].bit_length()
+        
+        cursor.execute('''
+        INSERT OR IGNORE INTO signatures (address, txid, vin, r_hex, s_hex, z_hex, pubkey_hex, r_int, s_int, z_int, r_bits)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (address, txid, vin, r_hex, s_hex, z_hex, pubkey, r_int, s_int, z_int, r_bits))
+    
+    conn.commit()
+    conn.close()
+
+def get_target_addresses(limit=10, only_unprocessed=True):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    query = "SELECT address FROM addresses"
+    if only_unprocessed:
+        query += " WHERE analyzed = 0"
+    query += f" LIMIT {limit}"
+    
+    cursor.execute(query)
+    addresses = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return addresses
+
+def mark_analyzed(address, status=True):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE addresses SET analyzed = ? WHERE address = ?", (1 if status else 0, address))
+    conn.commit()
+    conn.close()
+
+def get_signatures(address):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT r_int, s_int, z_int, txid FROM signatures WHERE address = ?", (address,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'r': int(r), 's': int(s), 'z': int(z), 'txid': txid} for r, s, z, txid in rows]
+
+def add_recovered_key(address, privkey_hex, wif='', method='Lattice'):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO recovered_keys (address, privkey_hex, wif, method)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(address) DO UPDATE SET
+    privkey_hex=excluded.privkey_hex,
+    wif=excluded.wif,
+    method=excluded.method,
+    found_at=CURRENT_TIMESTAMP
+    ''', (address, privkey_hex, wif, method))
+    
+    # Also update address table
+    cursor.execute('''
+    UPDATE addresses 
+    SET vulnerability = 'Recovered Private Key',
+        status = 'Compromised'
+    WHERE address = ?
+    ''', (address,))
+    
+    conn.commit()
+    conn.close()
+
+def find_all_addresses():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT address FROM addresses")
+    addresses = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return addresses
 
 if __name__ == "__main__":
     init_db()
