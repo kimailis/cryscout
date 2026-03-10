@@ -33,9 +33,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
 from db_manager import get_connection, add_finding
+from reverse_entropy_analyzer import get_reverse_entropy_features
 
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-FEATURE_DIM = 406  # Total features per signature set
+FEATURE_DIM = 438  # 406 original + 32 reverse entropy
 MODEL_PATH = 'nonce_anomaly_model.pt'
 
 
@@ -135,6 +136,10 @@ def extract_features(r_values):
             features.append(min(mag / 10.0, 1.0))
     else:
         features.extend([0.0] * 32)
+    
+    # 9. Reverse Entropy Features (32 features)
+    rev_entropy_feats = get_reverse_entropy_features(r_values)
+    features.extend(rev_entropy_feats)
 
     # Pad/truncate to FEATURE_DIM
     features = features[:FEATURE_DIM]
@@ -155,6 +160,27 @@ def generate_random_r_values(count):
 def generate_biased_r_values(count, bias_type='lsb'):
     """Generate biased R-values (WEAK nonces → label 1)."""
     values = []
+    if bias_type == 'lcg':
+        # LCG nonce: k_{i+1} = a*k_i + b mod P
+        a = random.randint(1, P - 1)
+        b = random.randint(1, P - 1)
+        k = random.randint(1, P - 1)
+        for _ in range(count):
+            values.append(k % P)
+            k = (a * k + b) % P
+        return values
+    
+    if bias_type == 'lfsr':
+        # LFSR-like behavior (linear recurrence over GF(2))
+        # Simplified: just a shift and xor
+        state = random.randint(1, (1 << 256) - 1)
+        for _ in range(count):
+            values.append(state % P)
+            # Feedback: xor bits 0, 2, 3, 5
+            fb = (state ^ (state >> 2) ^ (state >> 3) ^ (state >> 5)) & 1
+            state = (state >> 1) | (fb << 255)
+        return values
+
     for _ in range(count):
         if bias_type == 'lsb':
             # LSB bias: bottom 8 bits always the same
@@ -165,16 +191,6 @@ def generate_biased_r_values(count, bias_type='lsb'):
             # Small nonce: only 128 bits of entropy
             r = random.randint(1, 1 << 128)
             values.append(r)
-        elif bias_type == 'lcg':
-            # LCG nonce: k_{i+1} = a*k_i + b mod P
-            a = random.randint(1, P - 1)
-            b = random.randint(1, P - 1)
-            k = random.randint(1, P - 1)
-            for _ in range(count):
-                # Compute R = k*G (simplified: just use k as proxy for R)
-                values.append(k % P)
-                k = (a * k + b) % P
-            return values[:count]
         elif bias_type == 'repeated':
             # Some repeated R values
             base_r = random.randint(1, P - 1)
@@ -192,6 +208,12 @@ def generate_biased_r_values(count, bias_type='lsb'):
             r_bytes = bytes([pattern, 255 - pattern] * 16)
             r = int.from_bytes(r_bytes, 'big') % P
             values.append(r if r > 0 else 1)
+        elif bias_type == 'low_spectral':
+            # Sum of few sinusoids (low spectral entropy)
+            # We simulate this by choosing R values that are close in FFT domain
+            # (Simplified: just values with many repeating bit patterns)
+            r = sum((random.randint(0, 1) << (i * 8)) for i in range(32) if i % 4 == 0)
+            values.append(r % P if r > 0 else 1)
     return values
 
 
@@ -201,7 +223,7 @@ def generate_training_data(n_samples=50000, sigs_per_sample=20):
     X = []
     y = []
 
-    bias_types = ['lsb', 'small', 'lcg', 'repeated', 'msb_bias', 'pattern']
+    bias_types = ['lsb', 'small', 'lcg', 'lfsr', 'repeated', 'msb_bias', 'pattern', 'entropy_reversal', 'low_spectral']
 
     for i in range(n_samples):
         if i % 2 == 0:
@@ -211,7 +233,13 @@ def generate_training_data(n_samples=50000, sigs_per_sample=20):
         else:
             # Weak (label 1)
             bias = random.choice(bias_types)
-            r_vals = generate_biased_r_values(sigs_per_sample, bias_type=bias)
+            if bias == 'entropy_reversal':
+                # Low Permutation Entropy
+                base = random.randint(1, P//2)
+                step = random.randint(1, 1000000)
+                r_vals = [(base + i * step) % P for i in range(sigs_per_sample)]
+            else:
+                r_vals = generate_biased_r_values(sigs_per_sample, bias_type=bias)
             label = 1
 
         feats = extract_features(r_vals)
@@ -380,14 +408,30 @@ def scan_addresses_with_nn(max_addresses=100):
         if prob > 0.5:
             risk = "HIGH" if prob > 0.8 else "MEDIUM"
             print(f"  ⚠ {addr[:35]}... P(vuln)={prob:.4f} [{risk}] ({sig_count} sigs)")
+            
+            # Breakdown of Reverse Entropy Metrics
+            rev_entropy_feats = get_reverse_entropy_features(r_values)
+            pe3 = rev_entropy_feats[0]
+            samp_en = rev_entropy_feats[3]
+            spec_en = rev_entropy_feats[13]
+            lz_lsb = rev_entropy_feats[18]
+            
+            print(f"    - Reverse Entropy Stats: PE={pe3:.3f}, SampEn={samp_en:.3f}, SpecEn={spec_en:.3f}, LZ={lz_lsb:.3f}")
+            if pe3 < 0.6: print(f"      [!] Low Permutation Entropy - suggests LCG/LFSR pattern")
+            if spec_en < 0.5: print(f"      [!] Low Spectral Entropy - suggests periodic/patterned nonces")
+            if lz_lsb < 0.4: print(f"      [!] Low Lempel-Ziv Complexity - suggests simple repeatable pattern")
+            
             flagged.append({
                 'address': addr,
                 'probability': prob,
                 'risk': risk,
-                'sig_count': sig_count
+                'sig_count': sig_count,
+                'entropy_metrics': {
+                    'pe': pe3, 'samp_en': samp_en, 'spec_en': spec_en, 'lz': lz_lsb
+                }
             })
             add_finding(addr, 'Neural Net Anomaly',
-                        details=f'P(vulnerable)={prob:.4f}, {sig_count} sigs analyzed',
+                        details=f'P(vulnerable)={prob:.4f}, PE={pe3:.2f}, SpecEn={spec_en:.2f}',
                         severity='High' if prob > 0.8 else 'Medium')
         else:
             print(f"  ✓ {addr[:35]}... P(vuln)={prob:.4f} [OK] ({sig_count} sigs)")

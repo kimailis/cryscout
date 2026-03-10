@@ -1,0 +1,225 @@
+[08:40:29] Crypservice Engine Online. Background Scanner Active.
+[08:40:29] === Starting Scan Cycle 1 ===
+[08:40:29] --- Scoring all addresses for vulnerability ---
+[08:40:29] ======================================================================
+[08:40:29] VULNERABILITY SCORING — 1000 addresses
+[08:40:29] ======================================================================
+[08:40:30] TOP 30 MOST VULNERABLE ADDRESSES:
+[08:40:30] ==================================================================
+[08:40:30] [  1] 100/100 [CRITICAL] 12ib7dApVFvg82TXKycWBNpN8kFyiA...
+[08:40:30] Attacks: polynonce, lattice, r_reuse
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (31000.1 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 30/80 — Moderate 1-bit LSB bias (ratio=0.75); Moderate 2-bit LSB bias (ratio=0.75)
+[08:40:30] [  2] 100/100 [CRITICAL] 17rm2dvb439dZqyMe2d4D6AQJSgg6y...
+[08:40:30] Attacks: polynonce, lattice, r_reuse
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (20008.0 BTC) — attractive target
+[08:40:30] Label: 0/30 — No label
+[08:40:30] Sigs: 50/80 — R-value reuse detected! (1 reused R values)
+[08:40:30] [  3] 100/100 [CRITICAL] 1GR9qNz7zgtaW5HwwVpEJWMnGWhsbs...
+[08:40:30] Attacks: polynonce, lattice, r_reuse
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (15745.6 BTC) — attractive target
+[08:40:30] Label: 0/30 — No label
+[08:40:30] Sigs: 50/80 — R-value reuse detected! (1 reused R values)
+[08:40:30] [  4] 100/100 [CRITICAL] 1BeouDc6jtHpitvPz3gR3LQnBGb7dK...
+[08:40:30] Attacks: polynonce, lattice, r_reuse
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (5075.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 75/80 — Strong 1-bit LSB bias (ratio=0.83); R-value reuse detected! (6 reused R values)
+[08:40:30] [  5]  75/100 [CRITICAL] 1FeexV6bAHb8ybZjqQMjJrcCrHGW9s...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (79957.3 BTC) — attractive target
+[08:40:30] Label: 10/30 — Known hack/seizure — historical compromise
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [  6]  70/100 [CRITICAL] 15Z5YJaaNSxeynvr6uW6jQZLwq3n1H...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (7941.1 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — Normal signature patterns
+[08:40:30] [  7]  70/100 [CRITICAL] 1FvUkW8thcqG6HP7gAvAjcR52fR7CY...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (3350.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — Normal signature patterns
+[08:40:30] [  8]  70/100 [CRITICAL] 1EgH7EUfgjr8gAK9t1BeHLDC1ijrVv...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (3082.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [  9]  70/100 [CRITICAL] 1JaPNwMXt2AuVkWmkUHbsw78MbGorT...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (2195.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 10]  70/100 [CRITICAL] 13kxWCuDWN1gGSe2vPmsSBVXyPfYLM...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1320.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — Normal signature patterns
+[08:40:30] [ 11]  70/100 [CRITICAL] 1FdPpELnjHfwSM4Nvi7LdYS4S4GVGs...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1804.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — Normal signature patterns
+[08:40:30] [ 12]  70/100 [CRITICAL] 152kzDqjAVuPBMmJqcWvFbB7qkvigF...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1301.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — Normal signature patterns
+[08:40:30] [ 13]  70/100 [CRITICAL] 142fFLWkLgteEB48wC6tcChK5dXkpt...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (2068.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 14]  70/100 [CRITICAL] 13FKHnREotr4jrjiSJwPUpecogVT7R...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1750.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 15]  70/100 [CRITICAL] 1BVMFfPXJy2TY1x6wm8gow3N5Amw4E...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1698.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 16]  70/100 [CRITICAL] 1FUGUiJFcsLktTAkexy2ghT3Kus7yy...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1303.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 17]  70/100 [CRITICAL] 12yqUYtcCvDgiDgzJTT7DsSCoSifwY...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1105.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 18]  70/100 [CRITICAL] 1KmaiBSWEwmLcmq1TZzEJqwvmchS6t...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1093.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 19]  70/100 [CRITICAL] 155AkfuHgY7mZFDm9d7xGgP1rqXHMt...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 20]  70/100 [CRITICAL] 1KVyYVs7qbzuZt4s6M1hKRwtQZm2QQ...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 21]  70/100 [CRITICAL] 1JaVPjPHZgrBBwS3XW1w4KFUZFwvuA...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 22]  70/100 [CRITICAL] 16EwumVQQcGjqgcxkJ2J75sdhmjLH9...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 23]  70/100 [CRITICAL] 1FcKR5SsN1pQxkbHnTCrSPb6EV1eWq...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 24]  70/100 [CRITICAL] 1GXhEFqai4hDwHHJa3wU6y6mB1Yfvx...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 25]  70/100 [CRITICAL] 1Ek4uWz9RbGWKZdGRedEWT1a6SKCFY...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 26]  70/100 [CRITICAL] 19uqAzejS1ZXkmHGNJEau88ooob4QX...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 27]  70/100 [CRITICAL] 13vze7Q5jv3LRzDk6Q1gPSu3nweESE...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 28]  70/100 [CRITICAL] 1BZyajZKBLpgxcL8rS69DT6SAU5pqL...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 29]  70/100 [CRITICAL] 19SuKg8Nfp98Xk2MYWcMHtd5o9f3Fc...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] [ 30]  70/100 [CRITICAL] 1LtPgZNadP6efq2K54Lui9S4SA2gMs...
+[08:40:30] Attacks: brainwallet, seed_guess, weak_key
+[08:40:30] Age: 10/85 — Unknown age
+[08:40:30] Type: 40/40 — Legacy P2PKH — oldest format, pre-HD wallet era
+[08:40:30] Pattern: 15/40 — High balance (1000.0 BTC) — attractive target
+[08:40:30] Label: 5/30 — Generic wallet label
+[08:40:30] Sigs: 0/80 — No signatures available
+[08:40:30] DISTRIBUTION:
+[08:40:30] CRITICAL: 99
+[08:40:30] HIGH:     897
+[08:40:30] MEDIUM:   4
+[08:40:30] LOW:      0
+[08:40:30] Top 30 scores saved to vulnerability_scores.json
+[08:40:30] --- Scanning Debian OpenSSL + Blockchain Bandit Keys ---
