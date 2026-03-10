@@ -252,24 +252,35 @@ def sliding_window_lattice(address, window_size=15, step=5):
 # Main Runner
 # ============================================================
 
-def run_advanced_lattice(max_addresses=20):
-    """Run advanced lattice attacks on all addresses with signatures."""
+def run_advanced_lattice(max_addresses=20, target_address=None):
+    """Run advanced lattice attacks on all addresses with signatures, or a specific target."""
     print("=" * 60)
     print("ADVANCED LATTICE REDUCTION (BKZ + Progressive)")
     print("=" * 60)
 
     conn = get_connection()
     c = conn.cursor()
-    c.execute("""
-        SELECT a.address, COUNT(s.id) as sig_count,
-               COALESCE(a.current_balance, a.balance, 0) as bal
-        FROM addresses a
-        JOIN signatures s ON a.address = s.address
-        GROUP BY a.address
-        HAVING COUNT(s.id) >= 4
-        ORDER BY bal DESC
-        LIMIT ?
-    """, (max_addresses,))
+    
+    if target_address:
+        c.execute("""
+            SELECT a.address, COUNT(s.id) as sig_count,
+                   COALESCE(a.current_balance, a.balance, 0) as bal
+            FROM addresses a
+            JOIN signatures s ON a.address = s.address
+            WHERE a.address = ?
+            GROUP BY a.address
+        """, (target_address,))
+    else:
+        c.execute("""
+            SELECT a.address, COUNT(s.id) as sig_count,
+                   COALESCE(a.current_balance, a.balance, 0) as bal
+            FROM addresses a
+            JOIN signatures s ON a.address = s.address
+            GROUP BY a.address
+            HAVING COUNT(s.id) >= 4
+            ORDER BY bal DESC
+            LIMIT ?
+        """, (max_addresses,))
     targets = c.fetchall()
     conn.close()
 

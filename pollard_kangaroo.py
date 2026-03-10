@@ -234,7 +234,7 @@ def get_pubkey_for_address(address):
     """Retrieve the public key for an address from its signatures."""
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT pubkey FROM signatures WHERE address = ? AND pubkey IS NOT NULL LIMIT 1",
+    c.execute("SELECT pubkey_hex FROM signatures WHERE address = ? AND pubkey_hex IS NOT NULL AND pubkey_hex != '' LIMIT 1",
               (address,))
     row = c.fetchone()
     conn.close()
@@ -242,10 +242,17 @@ def get_pubkey_for_address(address):
     if row and row[0]:
         try:
             pub_hex = row[0]
+            # Handle both compressed (33 bytes) and uncompressed (65 bytes)
             pub_bytes = bytes.fromhex(pub_hex)
-            vk = ecdsa.VerifyingKey.from_string(pub_bytes, curve=SECP256k1)
+            if pub_hex.startswith('04'):
+                # Uncompressed
+                vk = ecdsa.VerifyingKey.from_string(pub_bytes[1:], curve=SECP256k1)
+            else:
+                # Compressed
+                vk = ecdsa.VerifyingKey.from_string(pub_bytes, curve=SECP256k1)
             return vk.pubkey.point
-        except:
+        except Exception as e:
+            # print(f"    Error parsing pubkey {row[0]}: {e}")
             pass
     return None
 
@@ -267,7 +274,7 @@ def kangaroo_from_lattice_hint(address, center, range_bits=40):
     return kangaroo_search(target, lower, upper)
 
 
-def run_kangaroo_scan(max_addresses=10):
+def run_kangaroo_scan(max_addresses=10, target_address=None):
     """
     Run kangaroo on addresses where we have public keys and
     can define bounded search ranges from lattice partial results.
@@ -279,16 +286,25 @@ def run_kangaroo_scan(max_addresses=10):
     conn = get_connection()
     c = conn.cursor()
 
-    # Find addresses with pubkeys and prior vulnerability findings
-    c.execute("""
-        SELECT DISTINCT s.address, 
-               COALESCE(a.current_balance, a.balance, 0) as bal
-        FROM signatures s
-        JOIN addresses a ON s.address = a.address
-        WHERE s.pubkey IS NOT NULL AND s.pubkey != ''
-        ORDER BY bal DESC
-        LIMIT ?
-    """, (max_addresses,))
+    if target_address:
+        c.execute("""
+            SELECT DISTINCT s.address, 
+                   COALESCE(a.current_balance, a.balance, 0) as bal
+            FROM signatures s
+            JOIN addresses a ON s.address = a.address
+            WHERE s.address = ? AND s.pubkey_hex IS NOT NULL AND s.pubkey_hex != ''
+        """, (target_address,))
+    else:
+        # Find addresses with pubkeys and prior vulnerability findings
+        c.execute("""
+            SELECT DISTINCT s.address, 
+                   COALESCE(a.current_balance, a.balance, 0) as bal
+            FROM signatures s
+            JOIN addresses a ON s.address = a.address
+            WHERE s.pubkey_hex IS NOT NULL AND s.pubkey_hex != ''
+            ORDER BY bal DESC
+            LIMIT ?
+        """, (max_addresses,))
     targets = c.fetchall()
     conn.close()
 

@@ -3,6 +3,8 @@ import hashlib
 import struct
 import re
 import time
+import aiohttp
+import asyncio
 
 # SECP256K1 Curve Order
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -107,13 +109,8 @@ def get_real_z_segwit(tx_data, vin_index):
     preimage = version + hash_prevouts + hash_sequence + outpoint + script_code + value + sequence + hash_outputs + locktime + sighash_type
     return int(double_sha256(preimage).hex(), 16)
 
-def get_real_z(txid, vin_index):
+def get_real_z(tx_data, vin_index):
     try:
-        api_url = f"https://mempool.space/api/tx/{txid}"
-        resp = requests.get(api_url, timeout=10)
-        if resp.status_code != 200: return None
-        tx_data = resp.json()
-        
         vin = tx_data['vin'][vin_index]
         spk_type = vin['prevout']['scriptpubkey_type']
         
@@ -122,10 +119,18 @@ def get_real_z(txid, vin_index):
         elif spk_type == 'v0_p2wpkh':
             return get_real_z_segwit(tx_data, vin_index)
         else:
-            print(f"Unsupported script type: {spk_type}")
             return None
-    except Exception as e:
-        print(f"Error in get_real_z: {e}")
+    except:
+        return None
+
+async def async_get_real_z(session, txid, vin_index):
+    try:
+        url = f"https://mempool.space/api/tx/{txid}"
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200: return None
+            tx_data = await resp.json()
+            return get_real_z(tx_data, vin_index)
+    except:
         return None
 
 def parse_der(sig_hex):
@@ -144,57 +149,65 @@ def parse_der(sig_hex):
     except:
         return None, None
 
-def extract_sigs_from_txids(address, txids, max_sigs=256):
+async def async_extract_sigs_from_txids(address, txids, max_sigs=256):
     full_data = []
-    for txid in txids:
-        if len(full_data) >= max_sigs: break
+    async with aiohttp.ClientSession() as session:
+        # Fetch TX data in parallel
+        tasks = []
+        for txid in txids[:max_sigs]:
+            tasks.append(session.get(f"https://mempool.space/api/tx/{txid}", timeout=10))
         
-        api_url = f"https://mempool.space/api/tx/{txid}"
-        resp = requests.get(api_url)
-        if resp.status_code != 200: continue
-        tx = resp.json()
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for i, vin in enumerate(tx.get('vin', [])):
-            if len(full_data) >= max_sigs: break
+        for i, resp in enumerate(responses):
+            if isinstance(resp, Exception) or resp.status != 200: continue
+            tx = await resp.json()
+            txid = txids[i]
             
-            if vin.get('prevout', {}).get('scriptpubkey_address') == address:
-                sig_hex = vin.get('scriptsig')
-                if not sig_hex and vin.get('witness'):
-                    sig_hex = vin['witness'][0]
-                if not sig_hex: continue
-                
-                r_val, s_val = parse_der(sig_hex)
-                if r_val and s_val:
-                    # Avoid duplicates
-                    if any(s['txid'] == txid and s['r'] == r_val for s in full_data):
-                        continue
-                        
-                    print(f"[{len(full_data)}] Calculating REAL Z for {txid} input {i}...")
-                    real_z = get_real_z(txid, i)
-                    if real_z:
-                        full_data.append({'r': r_val, 's': s_val, 'z': real_z, 'txid': txid})
+            for vin_idx, vin in enumerate(tx.get('vin', [])):
+                if vin.get('prevout', {}).get('scriptpubkey_address') == address:
+                    sig_hex = vin.get('scriptsig')
+                    if not sig_hex and vin.get('witness'):
+                        sig_hex = vin['witness'][0]
+                    if not sig_hex: continue
+                    
+                    r_val, s_val = parse_der(sig_hex)
+                    if r_val and s_val:
+                        z_val = get_real_z(tx, vin_idx)
+                        if z_val:
+                            full_data.append({'r': r_val, 's': s_val, 'z': z_val, 'txid': txid, 'vin': vin_idx})
+                            if len(full_data) >= max_sigs: return full_data
     return full_data
 
-def extract_sigs_with_real_z(address, max_pages=100, max_sigs=256):
+def extract_sigs_from_txids(address, txids, max_sigs=256):
+    # Synchronous wrapper for legacy code
+    return asyncio.run(async_extract_sigs_from_txids(address, txids, max_sigs))
+
+def extract_sigs_with_real_z(address, max_pages=50, max_sigs=256):
+    # This remains sync but uses async internally or we can make it all async
+    # For now, let's keep it sync for compatibility but it's a bottleneck
+    import requests
+    full_data = []
+    txids = []
     last_txid = None
-    all_spending_txids = []
-    for page in range(max_pages):
+    for _ in range(max_pages):
         url = f"https://mempool.space/api/address/{address}/txs/chain"
         if last_txid: url += f"/{last_txid}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200: break
-        txs = resp.json()
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200: break
+        txs = r.json()
         if not txs: break
         for tx in txs:
             for vin in tx.get('vin', []):
                 if vin.get('prevout', {}).get('scriptpubkey_address') == address:
-                    all_spending_txids.append(tx['txid'])
+                    txids.append(tx['txid'])
                     break
             last_txid = tx['txid']
-        if len(all_spending_txids) >= max_sigs * 2: break # Fetch more txids to ensure we get enough sigs
-        time.sleep(0.1)
-    if not all_spending_txids: return []
-    return extract_sigs_from_txids(address, all_spending_txids, max_sigs=max_sigs)
+        if len(txids) >= max_sigs: break
+    
+    if txids:
+        return extract_sigs_from_txids(address, txids, max_sigs)
+    return []
 
 if __name__ == "__main__":
     # Test with SegWit address from extract_tx_sigs_v2.py
