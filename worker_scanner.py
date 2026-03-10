@@ -3,15 +3,15 @@ import os
 import time
 import random
 from base_worker import BaseWorker
-from db_manager import claim_address, release_address, get_connection
+from db_manager import claim_address, release_address, get_connection, mark_stage_done
 from cryscout_enhanced import check_known_weak_nonces, try_related_nonce
 from weak_key_scanner import run_weak_key_scan
 from historical_vuln_scanner import run_historical_scans
 
 class ScannerWorker(BaseWorker):
     def process_loop(self):
-        # Scanner picks any unanalyzed address
-        addresses = claim_address(self.worker_id, limit=1)
+        # Scanner picks any address with fetched sigs that hasn't been scanned
+        addresses = claim_address(self.worker_id, stage='scanning', limit=1)
         if not addresses:
             self.heartbeat("Idle (Waiting for targets)")
             time.sleep(10)
@@ -39,9 +39,7 @@ class ScannerWorker(BaseWorker):
                 # We'll just do a small check here as part of the worker
                 # Full scan is done by the main weak_key_scanner script
                 
-                # Release it - analyzer might still want to look at sigs if they exist
-                # But if we found a key, it's already marked in recovered_keys
-                release_address(addr, self.worker_id)
+                mark_stage_done(addr, 'scanning', self.worker_id)
             except Exception as e:
                 self.log(f"Error scanning {addr}: {e}")
                 release_address(addr, self.worker_id)

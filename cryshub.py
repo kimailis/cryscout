@@ -21,6 +21,7 @@ class CryScoutHub:
         self.workers = {} # PID -> {process, type, started_at, last_log}
         self.running = True
         self.log_buffer = []
+        self.killed_cooldowns = {} # type -> cooldown_until
         
     def log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -84,6 +85,13 @@ class CryScoutHub:
         except: pass
 
     def start_worker(self, worker_type):
+        # Check cooldown
+        if worker_type in self.killed_cooldowns:
+            if time.time() < self.killed_cooldowns[worker_type]:
+                return None
+            else:
+                del self.killed_cooldowns[worker_type]
+
         script = f"worker_{worker_type}.py"
         try:
             # Run in a way that doesn't capture output to avoid filling pipe buffers
@@ -168,8 +176,14 @@ class CryScoutHub:
                         # Striker is most intensive, followed by analyzer and neural
                         targets = [pid for pid, info in self.workers.items() if info["type"] in ["striker", "analyzer", "neural"]]
                         if targets:
-                            pid = targets[0]
-                            self.log(f"Resource pressure (CPU:{cpu}%, RAM:{ram}%). Killing {self.workers[pid]['type']} {pid}.")
+                            # Prefer killing striker first if it exists
+                            striker_targets = [pid for pid in targets if self.workers[pid]["type"] == "striker"]
+                            pid = striker_targets[0] if striker_targets else targets[0]
+                            
+                            w_type = self.workers[pid]['type']
+                            self.log(f"Resource pressure (CPU:{cpu}%, RAM:{ram}%). Killing {w_type} {pid}.")
+                            # Add cooldown (60 seconds)
+                            self.killed_cooldowns[w_type] = time.time() + 60
                             os.kill(pid, signal.SIGTERM)
                 
                 # Maintain minimum workers
@@ -178,11 +192,16 @@ class CryScoutHub:
                     counts[info["type"]] += 1
                 
                 if self.running:
+                    # Priority 1: Fetcher and Scanner (Lightweight, essential for pipeline)
                     if counts["fetcher"] < 1: self.start_worker("fetcher")
                     if counts["scanner"] < 1: self.start_worker("scanner")
-                    if counts["analyzer"] < 1 and cpu < (MAX_CPU_PERCENT - 20):
+                    
+                    # Priority 2: Analyzer
+                    if counts["analyzer"] < 1 and cpu < (MAX_CPU_PERCENT - 15):
                         self.start_worker("analyzer")
-                    if counts["neural"] < 1 and ram < (MAX_RAM_PERCENT - 20):
+                    
+                    # Priority 3: Neural and Striker (Heavyweight)
+                    if counts["neural"] < 1 and ram < (MAX_RAM_PERCENT - 20) and cpu < (MAX_CPU_PERCENT - 20):
                         self.start_worker("neural")
                     if counts["striker"] < 1 and cpu < (MAX_CPU_PERCENT - 40):
                         self.start_worker("striker")

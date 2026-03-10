@@ -3,41 +3,22 @@ import os
 import time
 import random
 from base_worker import BaseWorker
-from db_manager import claim_address, release_address, get_connection
+from db_manager import claim_address, release_address, get_connection, mark_stage_done
 from cryscout_enhanced import run_lattice_attacks_enhanced, check_r_reuse_strict
 from deep_scan import run_algebraic_attacks
 
 class AnalyzerWorker(BaseWorker):
     def process_loop(self):
-        # Analyzer needs addresses that HAVE signatures
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("""
-            SELECT a.address FROM addresses a
-            JOIN (SELECT address, COUNT(*) as sig_count FROM signatures GROUP BY address) s
-                ON a.address = s.address
-            WHERE a.analyzed = 0 
-            AND (a.processing_by IS NULL OR a.processing_since < datetime('now', '-30 minutes'))
-            AND s.sig_count >= 2
-            ORDER BY a.current_balance DESC
-            LIMIT 1
-        """)
-        row = c.fetchone()
-        conn.close()
+        # Analyzer needs addresses that HAVE signatures and haven't been analyzed
+        extra_filter = "address IN (SELECT address FROM signatures GROUP BY address HAVING COUNT(*) >= 2)"
+        addresses = claim_address(self.worker_id, stage='analyzing', limit=1, extra_filter=extra_filter)
         
-        if not row:
+        if not addresses:
             self.heartbeat("Idle (Waiting for sigs)")
             time.sleep(10)
             return
 
-        addr = row[0]
-        # Claim it
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("UPDATE addresses SET processing_by = ?, processing_since = CURRENT_TIMESTAMP WHERE address = ?", (self.worker_id, addr))
-        conn.commit()
-        conn.close()
-
+        addr = addresses[0]
         self.heartbeat(f"Analyzing: {addr[:15]}...")
         self.log(f"Starting analysis for {addr}...")
         
@@ -59,7 +40,7 @@ class AnalyzerWorker(BaseWorker):
                 found = True
             
             # Done with this address
-            release_address(addr, self.worker_id, mark_done=True)
+            mark_stage_done(addr, 'analyzing', self.worker_id)
             self.log(f"Finished analysis for {addr}")
         except Exception as e:
             self.log(f"Error analyzing {addr}: {e}")
