@@ -5,6 +5,8 @@
 - **Nonce Analysis**: Extracted transaction signatures from the blockchain to perform checking for ECDSA nonce (k) reuse or low-entropy nonces. Addressed the need to verify randomness via `nonce_bias_detector.py` and `nonce_checker.py`.
 - **Brainwallet / Dictionary Scanning**: Prepared `dictionary.txt` and `extended_dictionary.txt` and created scripts (`brainwallet_scanner.py`, `warpwallet_scanner.py`) to systematically map known phrases to potential addresses.
 - **Data Consolidation**: Merged previous `analyzed_addresses.csv`, `checked_nonces.csv`, and `dormant_addresses.csv` into a single `master_address_tracking.csv`. Added columns `Analyzed` and `Potential_Weakness` to track the assessment state of each address.
+- **Neural Network Anomaly Detection**: Implemented a PyTorch-based binary classifier (`nonce_neural_detector.py`) to detect non-obvious patterns in ECDSA nonces that statistical tests miss.
+- **Reverse Entropy Analysis**: Developed a comprehensive suite of advanced cryptanalytic entropy metrics (`reverse_entropy_analyzer.py`), including Permutation Entropy, Multiscale Entropy, and Lempel-Ziv complexity, used as high-signal features for the neural network.
 
 ## 2. Methodology & Findings
 The current methodology focuses on cryptographic weaknesses and user-generated entropy flaws:
