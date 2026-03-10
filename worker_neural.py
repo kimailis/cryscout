@@ -11,47 +11,52 @@ class NeuralWorker(BaseWorker):
     def __init__(self, worker_id, task_name):
         super().__init__(worker_id, task_name)
         self.last_train_time = time.time()
-        self.train_interval = 3600 * 6  # Re-train every 6 hours to "learn" new patterns
+        self.train_interval = 3600 * 12  # Re-train every 12 hours
         
     def process_loop(self):
-        # 1. Check if we need to re-train (learning phase)
+        # 1. Periodic re-training
         if time.time() - self.last_train_time > self.train_interval:
             self.heartbeat("Learning (Training Model)")
-            self.log("Starting periodic re-training...")
             try:
-                # We can increase samples over time or use different seeds
                 train_model(epochs=10, n_samples=20000)
                 self.last_train_time = time.time()
-                self.log("Re-training complete.")
             except Exception as e:
                 self.log(f"Training error: {e}")
 
-        # 2. Scanning phase
-        self.heartbeat("Neural Scan: Initializing")
-        self.log("Scanning addresses for neural anomalies...")
+        # 2. Claim targets
+        from db_manager import claim_address, mark_stage_done
+        addresses = claim_address(self.worker_id, stage='neural', limit=10)
+        
+        if not addresses:
+            self.heartbeat("Neural Scan: Idle/Resting")
+            time.sleep(60) # Wait 1 min if no new sigs to scan
+            return
+
+        self.heartbeat(f"Neural Scan: Analyzing {len(addresses)} targets")
+        self.log(f"Running neural anomaly detection on {len(addresses)} addresses...")
+        
         try:
-            # We'll simulate a bit more granularity by splitting the scan if we could, 
-            # but for now we'll just update the heartbeat to be more descriptive
-            self.heartbeat("Neural Scan: Analyzing 20 targets")
-            flagged = scan_addresses_with_nn(max_addresses=20)
+            flagged = scan_addresses_with_nn(addresses=addresses)
+            
+            # Mark all claimed addresses as neural_scanned = 1
+            for addr in addresses:
+                mark_stage_done(addr, 'neural', self.worker_id)
+                
             if flagged:
-                self.heartbeat(f"Neural Scan: Found {len(flagged)} FLAGGED!")
                 self.log(f"Neural net flagged {len(flagged)} addresses!")
-                for f in flagged:
-                    self.log(f"  Flagged: {f['address'][:20]}... P={f['probability']:.4f}")
             else:
-                self.heartbeat("Neural Scan: No anomalies")
-                self.log("No new neural anomalies found.")
+                self.log("No new neural anomalies found in this batch.")
+                
         except Exception as e:
             self.heartbeat("Neural Scan: ERROR")
             self.log(f"Neural scan error: {e}")
+            # Release them if we failed
+            from db_manager import release_address
+            for addr in addresses:
+                release_address(addr, self.worker_id)
 
-        # Neural scanning is heavy, so we wait longer between passes
-        self.heartbeat("Neural Scan: Idle/Resting")
-        for _ in range(30): # 300 seconds total
-            if not self.running: break
-            time.sleep(10)
-            self.heartbeat()
+        # Small delay between batches to be nice to the DB
+        time.sleep(2)
 
 if __name__ == "__main__":
     # Ensure model exists before starting

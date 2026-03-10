@@ -56,6 +56,7 @@ def init_db():
         sigs_scanned BOOLEAN DEFAULT 0,
         analyzed BOOLEAN DEFAULT 0,
         nonces_checked BOOLEAN DEFAULT 0,
+        neural_scanned BOOLEAN DEFAULT 0,
         processing_by TEXT,
         processing_since DATETIME,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -121,6 +122,14 @@ def init_db():
     ''')
     
     conn.commit()
+
+    # Update existing DB if needed
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN neural_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
     conn.close()
 
 def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
@@ -142,6 +151,9 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     elif stage == 'forensic':
         # Forensic scans: Target P2PK and early Legacy addresses
         stage_filter = "(type LIKE 'P2PK%' OR address LIKE '1%') AND IFNULL(status, '') != 'Compromised'"
+    elif stage == 'neural':
+        # Neural scans: Target addresses with sigs that haven't been neural scanned
+        stage_filter = "neural_scanned = 0 AND sigs_fetched = 1"
     
     # Exclude already compromised addresses
     stage_filter = f"({stage_filter}) AND IFNULL(status, '') != 'Compromised'"
@@ -179,6 +191,8 @@ def mark_stage_done(address, stage, worker_id):
         column = "sigs_scanned"
     elif stage == 'analyzing':
         column = "analyzed"
+    elif stage == 'neural':
+        column = "neural_scanned"
 
     cursor.execute(f'''
     UPDATE addresses 

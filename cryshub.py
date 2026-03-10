@@ -122,6 +122,30 @@ class AsyncCryScoutHub:
         for pid in to_remove:
             del self.workers[pid]
 
+    async def stop_all(self):
+        self.log("Stopping all workers...")
+        self.running = False
+        # Update JSON immediately to reflect stopping status
+        await self.update_dashboard_json()
+        
+        for pid, info in list(self.workers.items()):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except: pass
+        
+        # Give them a moment to exit
+        await asyncio.sleep(2)
+        
+        # Force kill any survivors
+        for pid, info in list(self.workers.items()):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except: pass
+        
+        self.workers = {}
+        # Final JSON update
+        await self.update_dashboard_json()
+
     async def check_stop_signal(self):
         if os.path.exists(SIGNAL_FILE):
             try:
@@ -130,7 +154,7 @@ class AsyncCryScoutHub:
                 if sig == 'STOP':
                     self.log("Stop signal received. Shutting down.")
                     os.remove(SIGNAL_FILE)
-                    self.running = False
+                    await self.stop_all()
                     return True
             except: pass
         return False
@@ -168,11 +192,9 @@ class AsyncCryScoutHub:
                 self.log(f"Hub Main Loop Error: {e}")
                 await asyncio.sleep(5)
         
-        # Shutdown
-        self.log("Shutting down workers...")
-        for pid in list(self.workers.keys()):
-            try: os.kill(pid, signal.SIGTERM)
-            except: pass
+        # Shutdown if not already handled by stop_all
+        if self.workers:
+            await self.stop_all()
 
 if __name__ == "__main__":
     hub = AsyncCryScoutHub()

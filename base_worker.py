@@ -5,6 +5,7 @@ import json
 import sys
 import psutil
 import threading
+import signal
 from datetime import datetime
 from db_manager import update_worker_status, claim_address, release_address
 
@@ -17,6 +18,14 @@ class BaseWorker:
         self.current_task = task_name
         self.heartbeat_thread = None
         
+        # Setup signal handlers
+        signal.signal(signal.SIGTERM, self._handle_exit)
+        signal.signal(signal.SIGINT, self._handle_exit)
+
+    def _handle_exit(self, signum, frame):
+        self.log(f"Received signal {signum}. Shutting down gracefully...")
+        self.running = False
+
     def log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [{self.worker_id}] {message}")
