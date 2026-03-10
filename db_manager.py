@@ -1,12 +1,33 @@
 import sqlite3
 import os
 import json
+import time
+import random
 from datetime import datetime
 
 DB_NAME = 'cryscout.db'
 
-def get_connection():
-    return sqlite3.connect(DB_NAME)
+def get_connection(timeout=30.0):
+    """Get connection with a longer timeout for concurrent access."""
+    conn = sqlite3.connect(DB_NAME, timeout=timeout)
+    # Enable Write-Ahead Logging for better concurrency
+    try:
+        conn.execute('PRAGMA journal_mode=WAL')
+    except:
+        pass
+    return conn
+
+def execute_with_retry(func, *args, **kwargs):
+    """Execute a DB function with retries on lock."""
+    max_retries = 5
+    for i in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and i < max_retries - 1:
+                time.sleep(0.1 * (2 ** i) + random.random() * 0.1)
+                continue
+            raise
 
 def init_db():
     conn = get_connection()
@@ -33,6 +54,8 @@ def init_db():
         potential_weakness TEXT,
         analyzed BOOLEAN DEFAULT 0,
         nonces_checked BOOLEAN DEFAULT 0,
+        processing_by TEXT,
+        processing_since DATETIME,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -84,6 +107,74 @@ def init_db():
     )
     ''')
     
+    # Worker status table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS worker_status (
+        worker_id TEXT PRIMARY KEY,
+        task TEXT,
+        cpu_usage REAL,
+        ram_usage REAL,
+        last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def claim_address(worker_id, min_score=0, limit=1):
+    """Claim the most vulnerable addresses for a worker."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # We want addresses that are NOT being processed and NOT already analyzed (unless we want to re-analyze)
+    # Also prioritize by score if we have it in the potential_weakness or vulnerability field (simplified here)
+    cursor.execute('''
+    UPDATE addresses 
+    SET processing_by = ?, processing_since = CURRENT_TIMESTAMP
+    WHERE address IN (
+        SELECT address FROM addresses 
+        WHERE (processing_by IS NULL OR processing_since < datetime('now', '-30 minutes'))
+        AND analyzed = 0
+        ORDER BY current_balance DESC, transactions DESC
+        LIMIT ?
+    )
+    ''', (worker_id, limit))
+    
+    conn.commit()
+    
+    cursor.execute("SELECT address FROM addresses WHERE processing_by = ?", (worker_id,))
+    addresses = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return addresses
+
+def release_address(address, worker_id, mark_done=False):
+    """Release a claimed address."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mark_done:
+        cursor.execute('''
+        UPDATE addresses 
+        SET processing_by = NULL, processing_since = NULL, analyzed = 1 
+        WHERE address = ? AND processing_by = ?
+        ''', (address, worker_id))
+    else:
+        cursor.execute('''
+        UPDATE addresses 
+        SET processing_by = NULL, processing_since = NULL 
+        WHERE address = ? AND processing_by = ?
+        ''', (address, worker_id))
+    conn.commit()
+    conn.close()
+
+def update_worker_status(worker_id, task, cpu=0.0, ram=0.0):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO worker_status (worker_id, task, cpu_usage, ram_usage, last_heartbeat)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(worker_id) DO UPDATE SET
+    task=excluded.task, cpu_usage=excluded.cpu_usage, ram_usage=excluded.ram_usage, last_heartbeat=CURRENT_TIMESTAMP
+    ''', (worker_id, task, cpu, ram))
     conn.commit()
     conn.close()
 

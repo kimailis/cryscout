@@ -2,3 +2,12 @@ dormant_btc.html
 __pycache__/
 *.pyc
 .env
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.out
+*.pid
+service_status.json
+miner_status.json
+vulnerability_scores.json

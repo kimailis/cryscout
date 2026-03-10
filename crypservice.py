@@ -38,6 +38,7 @@ def service_log(message):
             with open(STATUS_FILE, 'r') as f:
                 status = json.load(f)
             status['logs'] = log_buffer
+            status['last_heartbeat'] = time.time()  # Keep heartbeat alive while logging
             with open(STATUS_FILE, 'w') as f:
                 json.dump(status, f)
     except:
