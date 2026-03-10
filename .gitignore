@@ -11,3 +11,11 @@ __pycache__/
 service_status.json
 miner_status.json
 vulnerability_scores.json
+service_startup.log
+hub_orchestra.log
+scanner.log
+analyze.log
+miner.log
+*.db
+*.db-shm
+*.db-wal

@@ -52,6 +52,8 @@ def init_db():
         type TEXT,
         vulnerability TEXT,
         potential_weakness TEXT,
+        sigs_fetched BOOLEAN DEFAULT 0,
+        sigs_scanned BOOLEAN DEFAULT 0,
         analyzed BOOLEAN DEFAULT 0,
         nonces_checked BOOLEAN DEFAULT 0,
         processing_by TEXT,
@@ -121,20 +123,30 @@ def init_db():
     conn.commit()
     conn.close()
 
-def claim_address(worker_id, min_score=0, limit=1):
+def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     """Claim the most vulnerable addresses for a worker."""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # We want addresses that are NOT being processed and NOT already analyzed (unless we want to re-analyze)
-    # Also prioritize by score if we have it in the potential_weakness or vulnerability field (simplified here)
-    cursor.execute('''
+    # Define stage filter
+    stage_filter = "analyzed = 0"
+    if stage == 'fetching':
+        stage_filter = "sigs_fetched = 0"
+    elif stage == 'scanning':
+        stage_filter = "sigs_scanned = 0 AND sigs_fetched = 1"
+    elif stage == 'analyzing':
+        stage_filter = "analyzed = 0 AND sigs_fetched = 1"
+    
+    if extra_filter:
+        stage_filter += f" AND {extra_filter}"
+
+    cursor.execute(f'''
     UPDATE addresses 
     SET processing_by = ?, processing_since = CURRENT_TIMESTAMP
     WHERE address IN (
         SELECT address FROM addresses 
         WHERE (processing_by IS NULL OR processing_since < datetime('now', '-30 minutes'))
-        AND analyzed = 0
+        AND {stage_filter}
         ORDER BY current_balance DESC, transactions DESC
         LIMIT ?
     )
@@ -146,6 +158,26 @@ def claim_address(worker_id, min_score=0, limit=1):
     addresses = [row[0] for row in cursor.fetchall()]
     conn.close()
     return addresses
+
+def mark_stage_done(address, stage, worker_id):
+    """Mark a specific stage as done for an address."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    column = "analyzed"
+    if stage == 'fetching':
+        column = "sigs_fetched"
+    elif stage == 'scanning':
+        column = "sigs_scanned"
+    elif stage == 'analyzing':
+        column = "analyzed"
+
+    cursor.execute(f'''
+    UPDATE addresses 
+    SET {column} = 1, processing_by = NULL, processing_since = NULL 
+    WHERE address = ? AND processing_by = ?
+    ''', (address, worker_id))
+    conn.commit()
+    conn.close()
 
 def release_address(address, worker_id, mark_done=False):
     """Release a claimed address."""
