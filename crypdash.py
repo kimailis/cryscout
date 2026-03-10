@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import curses
 import time
 import os
 import json
@@ -7,6 +6,12 @@ import sqlite3
 import subprocess
 import sys
 from db_manager import get_connection, get_stats as get_db_stats
+
+try:
+    import curses
+    CURSES_AVAILABLE = True
+except ImportError:
+    CURSES_AVAILABLE = False
 
 # CONFIGURATION
 STATUS_FILE = 'service_status.json'
@@ -87,7 +92,10 @@ def send_signal(sig):
 
 def start_service():
     # Execute detached
-    subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except:
+        subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def reset_analysis():
     try:
@@ -217,5 +225,81 @@ def draw_dashboard(stdscr):
         elif c == ord('k') or c == ord('K'): mode = "KEYS"
         elif c == ord('b') or c == ord('B'): mode = "MAIN"
 
+def draw_text_dashboard():
+    """Fallback text dashboard for environments without curses."""
+    print("CRYPDASH - Text Mode Monitor (Press Ctrl+C to quit)\n")
+    mode = "MAIN"
+    last_logs_len = 0
+    
+    while True:
+        info = get_service_info()
+        stats = get_stats()
+        
+        # We only print the full status periodically or when logs change
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
+        is_running = info.get('running', False)
+        status_text = "RUNNING" if is_running else "STOPPED"
+        if info.get('current_task') == "Not Responding":
+            status_text = "NOT RESPONDING"
+            
+        print("===" * 20)
+        print(f"Service Status: {status_text} (PID: {info.get('pid', 'N/A')})")
+        print(f"Current Task:   {info.get('current_task', 'N/A')}")
+        print("---")
+        print(f"Total Addresses Tracked: {stats['Total']}")
+        print(f"Addresses Analyzed:      {stats['Analyzed']}")
+        print(f"Dormant Targets:         {stats['Dormant']}")
+        print(f"Keys Recovered:          {stats['Recovered']}")
+        print(f"CPU Load: {info.get('cpu_usage', 0)}%  |  RAM Use: {info.get('ram_usage', 0)}%")
+        print("===" * 20)
+        print(" Live Activity Log:")
+        
+        logs = info.get('logs', [])
+        for p in logs[-15:]:
+            print(f"  {p}")
+            
+        print("\nControls: [S] Start | [T] Stop | [R] Restart | [Q] Quit  (Press keys without pressing Enter)")
+        
+        # Interactive delay loop to catch keystrokes without curses
+        for _ in range(20):
+            if os.name == 'nt':
+                import msvcrt
+                if msvcrt.kbhit():
+                    c = msvcrt.getch().lower()
+                    if c == b'q':
+                        return
+                    elif c == b's' and not info.get('running', False):
+                        start_service()
+                    elif c == b't':
+                        send_signal('STOP')
+                    elif c == b'r':
+                        send_signal('STOP')
+                        time.sleep(1.5)
+                        start_service()
+                    break # exit the delay loop to refresh
+            else:
+                import select
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    c = sys.stdin.read(1).lower()
+                    if c == 'q':
+                        return
+                    elif c == 's' and not info.get('running', False):
+                        start_service()
+                    elif c == 't':
+                        send_signal('STOP')
+                    break
+            time.sleep(0.1)
+
 if __name__ == "__main__":
-    curses.wrapper(draw_dashboard)
+    if CURSES_AVAILABLE:
+        try:
+            curses.wrapper(draw_dashboard)
+        except curses.error:
+            # If the terminal size is too small or messes up, fallback
+            draw_text_dashboard()
+    else:
+        try:
+            draw_text_dashboard()
+        except KeyboardInterrupt:
+            print("\nExiting dashboard.")

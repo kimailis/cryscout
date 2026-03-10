@@ -36,11 +36,11 @@
 
 ## Phase 2 — Immediate Next Steps
 
-### 2.1 Massive Brainwallet Dictionary Attack
+### 2.1 Massive Brainwallet Dictionary Attack → `massive_brainwallet.py`
 **Priority: HIGH** — Known to work historically. Many early Bitcoin addresses used SHA256(passphrase) as private keys.
 
-- [ ] Generate comprehensive wordlist (1M+ entries):
-  - Common passwords (top 100K from public breach compilations)
+- [x] Generate comprehensive wordlist (10M+ entries):
+  - Common passwords (loads rockyou.txt / passwords.txt if present)
   - All English words + common misspellings
   - Number sequences (0–10M)
   - Keyboard patterns (`qwerty`, `asdfgh`, `zxcvbn`, etc.)
@@ -48,31 +48,32 @@
   - Bitcoin-related phrases (`satoshi`, `nakamoto`, `genesis`, etc.)
   - Leetspeak variations (`p4ssw0rd`, `b1tc01n`)
   - Date-based strings (`20090103`, `01/03/2009`)
-  - Email-style strings (`user@domain`)
   - Phone number patterns
-- [ ] Implement batch GPU-accelerated SHA256 hashing
-- [ ] Multi-threaded address comparison using bloom filters
-- [ ] Run against ALL 1,000 tracked addresses
+- [ ] Implement batch GPU-accelerated SHA256 hashing (future)
+- [x] Address comparison using set() lookup (O(1) per check)
+- [x] Run against ALL 1,000 tracked addresses
 
-### 2.2 Known-Vulnerable Address Database
+### 2.2 Known-Vulnerable Address Database → `known_vuln_scanner.py`
 **Priority: HIGH** — Public databases exist of addresses with confirmed weak keys.
 
-- [ ] Fetch addresses from known weak-key databases:
-  - [directory.io](https://directory.io) pattern (sequential private keys)
-  - Known Blockchain Bandit addresses (programmatically searched weak keys)
-  - Historical Android SecureRandom bug victims (2013)
-  - Debian OpenSSL weak key set (32,768 possible keys)
-- [ ] Cross-reference with our tracked addresses
-- [ ] Scan for Blockchain Bandit-style sequential keys (1 to 2^32)
-- [ ] Import known compromised key lists and verify against our DB
+- [x] Generate Debian OpenSSL weak keys (CVE-2008-0166):
+  - SHA256(PID bytes) for PIDs 1-32768
+  - SHA256(PID string) for PIDs 1-32768
+  - Direct PID as key (1-32768)
+  - MD5(PID) padded to 32 bytes
+  - Combined PID+UID variants (root, user, nobody)
+- [x] Blockchain Bandit sequential keys (1 to 2^24, expanding each cycle)
+- [x] Known compromised hex patterns (repeated bytes, powers of 2, Fibonacci, famous constants)
+- [x] Bitcoin Puzzle range boundaries
+- [x] Cross-reference ALL against our tracked addresses
 
-### 2.3 Expanded Signature Collection
+### 2.3 Expanded Signature Collection → `expanded_sig_fetch.py` + `api_client.py`
 **Priority: HIGH** — More signatures = better lattice attack surface.
 
-- [ ] Fix API rate limiting strategy (exponential backoff, rotate user agents)
-- [ ] Add Esplora API as additional source
-- [ ] Implement raw Bitcoin RPC connection for local full node (if available)
-- [ ] Target addresses with high TX count but few collected sigs:
+- [x] Fix API rate limiting strategy (exponential backoff, user agent rotation)
+- [x] Add Esplora API (Blockstream) as 4th source
+- [x] Implement raw Bitcoin RPC connection for local full node (if available)
+- [x] Target addresses with high TX count but few collected sigs:
   - `12ib7dAp` — 250 TXs, only 4 sigs collected (31K BTC)
   - `15Z5YJaa` — 138 TXs, only 60 sigs (8K BTC)
   - `17rm2dvb` — 118 TXs, only 1 sig (20K BTC)
