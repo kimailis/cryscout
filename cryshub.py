@@ -170,21 +170,9 @@ class CryScoutHub:
                 # Update dashboard every loop to keep heartbeat alive
                 self.update_dashboard_json(cpu_val=cpu)
                 
-                # Resource management logic
+                # Resource management logic (Throttling handled by workers, Hub only monitors)
                 if cpu > MAX_CPU_PERCENT or ram > MAX_RAM_PERCENT:
-                    if len(self.workers) > 1:
-                        # Striker is most intensive, followed by analyzer and neural
-                        targets = [pid for pid, info in self.workers.items() if info["type"] in ["striker", "analyzer", "neural"]]
-                        if targets:
-                            # Prefer killing striker first if it exists
-                            striker_targets = [pid for pid in targets if self.workers[pid]["type"] == "striker"]
-                            pid = striker_targets[0] if striker_targets else targets[0]
-                            
-                            w_type = self.workers[pid]['type']
-                            self.log(f"Resource pressure (CPU:{cpu}%, RAM:{ram}%). Killing {w_type} {pid}.")
-                            # Add cooldown (60 seconds)
-                            self.killed_cooldowns[w_type] = time.time() + 60
-                            os.kill(pid, signal.SIGTERM)
+                    self.log(f"WARNING: High resource usage (CPU:{cpu}%, RAM:{ram}%). Throttling should be active.")
                 
                 # Maintain minimum workers
                 counts = { "fetcher": 0, "analyzer": 0, "scanner": 0, "neural": 0, "striker": 0 }
@@ -197,13 +185,13 @@ class CryScoutHub:
                     if counts["scanner"] < 1: self.start_worker("scanner")
                     
                     # Priority 2: Analyzer
-                    if counts["analyzer"] < 1 and cpu < (MAX_CPU_PERCENT - 15):
+                    if counts["analyzer"] < 1:
                         self.start_worker("analyzer")
                     
                     # Priority 3: Neural and Striker (Heavyweight)
-                    if counts["neural"] < 1 and ram < (MAX_RAM_PERCENT - 20) and cpu < (MAX_CPU_PERCENT - 20):
+                    if counts["neural"] < 1:
                         self.start_worker("neural")
-                    if counts["striker"] < 1 and cpu < (MAX_CPU_PERCENT - 40):
+                    if counts["striker"] < 1:
                         self.start_worker("striker")
                 
                 time.sleep(2)
