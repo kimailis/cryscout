@@ -254,5 +254,45 @@ class BitcoinAPI:
         
         return None
 
+import aiohttp
+import asyncio
+
+class AsyncBitcoinAPI:
+    def __init__(self):
+        self.sources = [
+            {'name': 'mempool', 'base': 'https://mempool.space/api', 'rate': 0.3},
+            {'name': 'esplora', 'base': 'https://blockstream.info/api', 'rate': 0.3},
+        ]
+        self.headers = {'User-Agent': random.choice(USER_AGENTS)}
+
+    async def get_address_txids(self, address, max_txs=100):
+        async with aiohttp.ClientSession(headers=self.headers) as session:
+            # Try mempool
+            try:
+                async with session.get(f"{self.sources[0]['base']}/address/{address}/txs/chain", timeout=15) as resp:
+                    if resp.status == 200:
+                        txs = await resp.json()
+                        txids = []
+                        for tx in txs:
+                            for vin in tx.get('vin', []):
+                                if vin.get('prevout', {}).get('scriptpubkey_address') == address:
+                                    txids.append(tx['txid'])
+                                    break
+                        return txids[:max_txs]
+            except: pass
+            return []
+
+    async def get_tx_data(self, txid):
+        async with aiohttp.ClientSession(headers=self.headers) as session:
+            for src in self.sources:
+                try:
+                    async with session.get(f"{src['base']}/tx/{txid}", timeout=10) as resp:
+                        if resp.status == 200:
+                            return await resp.json()
+                except: continue
+        return None
+
+async_api = AsyncBitcoinAPI()
+
 # Singleton
 api = BitcoinAPI()

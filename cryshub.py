@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import subprocess
 import time
 import os
@@ -12,16 +13,15 @@ from datetime import datetime
 # CONFIGURATION
 STATUS_FILE = 'service_status.json'
 SIGNAL_FILE = 'service_signal.txt'
-MAX_WORKERS = 4
+WORKER_TYPES = ["fetcher", "scanner", "analyzer", "neural", "striker", "forensic"]
 MAX_CPU_PERCENT = 85.0
 MAX_RAM_PERCENT = 85.0
 
-class CryScoutHub:
+class AsyncCryScoutHub:
     def __init__(self):
-        self.workers = {} # PID -> {process, type, started_at, last_log}
+        self.workers = {} # PID -> {process, type, started_at}
         self.running = True
         self.log_buffer = []
-        self.killed_cooldowns = {} # type -> cooldown_until
         
     def log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -32,14 +32,11 @@ class CryScoutHub:
             self.log_buffer.pop(0)
         sys.stdout.flush()
 
-    def get_worker_details(self):
+    async def get_worker_details(self):
         """Fetch detailed status for all active workers from the DB."""
-        details = []
-        try:
-            # Use the same connection helper as others if possible, but keep it simple
+        def query_db():
             conn = sqlite3.connect('cryscout.db', timeout=20)
             cursor = conn.cursor()
-            # Get workers active in the last 120 seconds (be more generous)
             cursor.execute("""
                 SELECT worker_id, task, cpu_usage, ram_usage, last_heartbeat 
                 FROM worker_status 
@@ -47,26 +44,26 @@ class CryScoutHub:
                 ORDER BY worker_id ASC
             """)
             rows = cursor.fetchall()
+            conn.close()
+            return rows
+        
+        try:
+            rows = await asyncio.to_thread(query_db)
+            details = []
             for row in rows:
                 details.append({
-                    "id": row[0],
-                    "task": row[1],
-                    "cpu": row[2],
-                    "ram": row[3],
-                    "last_seen": row[4]
+                    "id": row[0], "task": row[1], "cpu": row[2], 
+                    "ram": row[3], "last_seen": row[4]
                 })
-            conn.close()
+            return details
         except Exception as e:
-            # We print directly to stdout here to avoid any chance of recursion in log()
-            print(f"Error fetching worker details: {e}")
-        return details
+            self.log(f"DB Query Error: {e}")
+            return []
 
-    def update_dashboard_json(self, cpu_val=None):
-        cpu = cpu_val if cpu_val is not None else psutil.cpu_percent()
+    async def update_dashboard_json(self):
+        cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
-        
-        # Aggregate worker statuses
-        worker_details = self.get_worker_details()
+        worker_details = await self.get_worker_details()
         
         status = {
             "running": self.running,
@@ -82,130 +79,104 @@ class CryScoutHub:
         try:
             with open(STATUS_FILE, 'w') as f:
                 json.dump(status, f)
-        except: pass
+        except Exception as e:
+            self.log(f"JSON Write Error: {e}")
 
-    def start_worker(self, worker_type):
-        # Check cooldown
-        if worker_type in self.killed_cooldowns:
-            if time.time() < self.killed_cooldowns[worker_type]:
-                return None
-            else:
-                del self.killed_cooldowns[worker_type]
-
+    async def start_worker(self, worker_type):
         script = f"worker_{worker_type}.py"
         try:
-            # Run in a way that doesn't capture output to avoid filling pipe buffers
-            # but allows us to see logs in the hub's stdout if we want, or redirect to files.
-            p = subprocess.Popen([sys.executable, script], 
-                                stdout=subprocess.PIPE, 
-                                stderr=subprocess.STDOUT,
-                                text=True,
-                                bufsize=1)
+            p = await asyncio.create_subprocess_exec(
+                sys.executable, script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT
+            )
             self.workers[p.pid] = {
                 "process": p,
                 "type": worker_type,
                 "started_at": time.time()
             }
             self.log(f"Started {worker_type} worker (PID: {p.pid})")
+            asyncio.create_task(self.read_worker_logs(p))
             return p
         except Exception as e:
             self.log(f"Failed to start {worker_type}: {e}")
             return None
 
-    def check_workers(self):
+    async def read_worker_logs(self, process):
+        while True:
+            try:
+                line = await process.stdout.readline()
+                if not line: break
+                # Small sleep to yield to other tasks
+                await asyncio.sleep(0.1)
+            except:
+                break
+
+    async def check_workers(self):
         to_remove = []
-        for pid, info in self.workers.items():
+        for pid, info in list(self.workers.items()):
             p = info["process"]
-            if p.poll() is not None:
-                # Process died
-                out, _ = p.communicate()
+            if p.returncode is not None:
                 self.log(f"Worker {info['type']} (PID: {pid}) exited with code {p.returncode}")
-                if out:
-                    self.log(f"Last logs from {pid}: {out.splitlines()[-3:] if out else 'none'}")
                 to_remove.append(pid)
-        
         for pid in to_remove:
             del self.workers[pid]
 
-    def stop_all(self):
-        self.log("Stopping all workers...")
-        for pid, info in self.workers.items():
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except:
-                pass
-        self.running = False
-
-    def check_stop_signal(self):
+    async def check_stop_signal(self):
         if os.path.exists(SIGNAL_FILE):
             try:
                 with open(SIGNAL_FILE, 'r') as f:
                     sig = f.read().strip()
                 if sig == 'STOP':
-                    self.log("Stop signal received from dashboard. Shutting down.")
+                    self.log("Stop signal received. Shutting down.")
                     os.remove(SIGNAL_FILE)
-                    self.stop_all()
+                    self.running = False
                     return True
             except: pass
         return False
 
-    def run(self):
-        self.log("CryScout Hub Online. Managing parallel services.")
+    async def run(self):
+        self.log("Async CryScout Hub Online.")
+        # Start initial workers
+        for w_type in WORKER_TYPES:
+            await self.start_worker(w_type)
         
-        # Initial workers
-        self.start_worker("fetcher")
-        self.start_worker("scanner")
-        self.start_worker("analyzer")
-        self.start_worker("neural")
-        self.start_worker("striker")
+        # Give a moment to initialize and write first status
+        await asyncio.sleep(2)
         
         while self.running:
             try:
-                if self.check_stop_signal(): break
-                self.check_workers()
+                if await self.check_stop_signal(): break
+                await self.check_workers()
                 
-                cpu = psutil.cpu_percent(interval=1)
-                ram = psutil.virtual_memory().percent
-                
-                # Update dashboard every loop to keep heartbeat alive
-                self.update_dashboard_json(cpu_val=cpu)
-                
-                # Resource management logic (Throttling handled by workers, Hub only monitors)
-                if cpu > MAX_CPU_PERCENT or ram > MAX_RAM_PERCENT:
-                    self.log(f"WARNING: High resource usage (CPU:{cpu}%, RAM:{ram}%). Throttling should be active.")
-                
-                # Maintain minimum workers
-                counts = { "fetcher": 0, "analyzer": 0, "scanner": 0, "neural": 0, "striker": 0 }
+                # Maintenance
+                current_counts = { w: 0 for w in WORKER_TYPES }
                 for pid, info in self.workers.items():
-                    counts[info["type"]] += 1
+                    if info["type"] in current_counts:
+                        current_counts[info["type"]] += 1
                 
-                if self.running:
-                    # Priority 1: Fetcher and Scanner (Lightweight, essential for pipeline)
-                    if counts["fetcher"] < 1: self.start_worker("fetcher")
-                    if counts["scanner"] < 1: self.start_worker("scanner")
-                    
-                    # Priority 2: Analyzer
-                    if counts["analyzer"] < 1:
-                        self.start_worker("analyzer")
-                    
-                    # Priority 3: Neural and Striker (Heavyweight)
-                    if counts["neural"] < 1:
-                        self.start_worker("neural")
-                    if counts["striker"] < 1:
-                        self.start_worker("striker")
+                for w_type in WORKER_TYPES:
+                    if current_counts[w_type] < 1 and self.running:
+                        self.log(f"Restarting missing worker: {w_type}")
+                        await self.start_worker(w_type)
                 
-                time.sleep(2)
+                await self.update_dashboard_json()
+                # Yield to other tasks
+                await asyncio.sleep(5)
                 
-            except KeyboardInterrupt:
-                self.stop_all()
-                break
             except Exception as e:
-                self.log(f"Hub Error: {e}")
-                time.sleep(5)
+                self.log(f"Hub Main Loop Error: {e}")
+                await asyncio.sleep(5)
+        
+        # Shutdown
+        self.log("Shutting down workers...")
+        for pid in list(self.workers.keys()):
+            try: os.kill(pid, signal.SIGTERM)
+            except: pass
 
 if __name__ == "__main__":
-    hub = CryScoutHub()
+    hub = AsyncCryScoutHub()
     try:
-        hub.run()
+        asyncio.run(hub.run())
     except KeyboardInterrupt:
-        hub.stop_all()
+        pass

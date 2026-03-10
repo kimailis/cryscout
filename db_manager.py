@@ -139,6 +139,9 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     elif stage == 'analyzing':
         # Re-analyze every 1 day with potentially deeper lattice/algebraic parameters
         stage_filter = "(analyzed = 0 OR last_updated < datetime('now', '-1 day')) AND sigs_fetched = 1"
+    elif stage == 'forensic':
+        # Forensic scans: Target P2PK and early Legacy addresses
+        stage_filter = "(type LIKE 'P2PK%' OR address LIKE '1%') AND IFNULL(status, '') != 'Compromised'"
     
     # Exclude already compromised addresses
     stage_filter = f"({stage_filter}) AND IFNULL(status, '') != 'Compromised'"

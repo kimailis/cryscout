@@ -48,7 +48,10 @@ class NeuralWorker(BaseWorker):
 
         # Neural scanning is heavy, so we wait longer between passes
         self.heartbeat("Neural Scan: Idle/Resting")
-        time.sleep(300) # Scan every 5 minutes
+        for _ in range(30): # 300 seconds total
+            if not self.running: break
+            time.sleep(10)
+            self.heartbeat()
 
 if __name__ == "__main__":
     # Ensure model exists before starting
