@@ -352,14 +352,29 @@ def load_model():
 # Inference on Real Addresses
 # ============================================================
 
-def scan_addresses_with_nn(max_addresses=100):
+def scan_addresses_with_nn(addresses=None):
     """
     Apply the trained neural network to real signature sets.
     Flag addresses with high P(vulnerable) for deeper analysis.
     """
-    print("=" * 60)
-    print("NEURAL NETWORK NONCE ANOMALY SCAN")
-    print("=" * 60)
+    if addresses is None:
+        # Backward compatibility if run directly
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT address, COUNT(*) as sig_count
+            FROM signatures
+            GROUP BY address
+            HAVING COUNT(*) >= 4
+            ORDER BY sig_count DESC
+            LIMIT 20
+        """)
+        addresses_with_count = c.fetchall()
+        conn.close()
+        addresses = [a[0] for a in addresses_with_count]
+
+    if not addresses:
+        return []
 
     # Load or train model
     model = load_model()
@@ -368,28 +383,13 @@ def scan_addresses_with_nn(max_addresses=100):
         model = train_model(epochs=30, n_samples=50000)
         model = load_model()
 
-    # Get addresses with sufficient signatures
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT address, COUNT(*) as sig_count
-        FROM signatures
-        GROUP BY address
-        HAVING COUNT(*) >= 4
-        ORDER BY sig_count DESC
-        LIMIT ?
-    """, (max_addresses,))
-    addresses = c.fetchall()
-
-    if not addresses:
-        print("  No addresses with sufficient signatures (need ≥4)")
-        conn.close()
-        return []
-
     print(f"  Scanning {len(addresses)} addresses with neural network...")
 
+    conn = get_connection()
+    c = conn.cursor()
     flagged = []
-    for addr, sig_count in addresses:
+    
+    for addr in addresses:
         c.execute("SELECT r_int FROM signatures WHERE address = ?", (addr,))
         rows = c.fetchall()
         r_values = [int(r[0]) for r in rows if r[0]]
@@ -407,44 +407,28 @@ def scan_addresses_with_nn(max_addresses=100):
 
         if prob > 0.5:
             risk = "HIGH" if prob > 0.8 else "MEDIUM"
-            print(f"  ⚠ {addr[:35]}... P(vuln)={prob:.4f} [{risk}] ({sig_count} sigs)")
+            print(f"  ⚠ {addr[:35]}... P(vuln)={prob:.4f} [{risk}]")
             
             # Breakdown of Reverse Entropy Metrics
             rev_entropy_feats = get_reverse_entropy_features(r_values)
             pe3 = rev_entropy_feats[0]
-            samp_en = rev_entropy_feats[3]
             spec_en = rev_entropy_feats[13]
             lz_lsb = rev_entropy_feats[18]
-            
-            print(f"    - Reverse Entropy Stats: PE={pe3:.3f}, SampEn={samp_en:.3f}, SpecEn={spec_en:.3f}, LZ={lz_lsb:.3f}")
-            if pe3 < 0.6: print(f"      [!] Low Permutation Entropy - suggests LCG/LFSR pattern")
-            if spec_en < 0.5: print(f"      [!] Low Spectral Entropy - suggests periodic/patterned nonces")
-            if lz_lsb < 0.4: print(f"      [!] Low Lempel-Ziv Complexity - suggests simple repeatable pattern")
             
             flagged.append({
                 'address': addr,
                 'probability': prob,
                 'risk': risk,
-                'sig_count': sig_count,
-                'entropy_metrics': {
-                    'pe': pe3, 'samp_en': samp_en, 'spec_en': spec_en, 'lz': lz_lsb
-                }
+                'entropy_metrics': {'pe': pe3, 'spec_en': spec_en, 'lz': lz_lsb}
             })
             add_finding(addr, 'Neural Net Anomaly',
                         details=f'P(vulnerable)={prob:.4f}, PE={pe3:.2f}, SpecEn={spec_en:.2f}',
                         severity='High' if prob > 0.8 else 'Medium')
         else:
-            print(f"  ✓ {addr[:35]}... P(vuln)={prob:.4f} [OK] ({sig_count} sigs)")
+            # print(f"  ✓ {addr[:35]}... P(vuln)={prob:.4f} [OK]")
+            pass
 
     conn.close()
-
-    # Summary
-    print(f"\n  Results: {len(flagged)}/{len(addresses)} addresses flagged")
-    if flagged:
-        print(f"  Flagged addresses (sorted by risk):")
-        for f in sorted(flagged, key=lambda x: x['probability'], reverse=True):
-            print(f"    {f['address'][:40]}... P={f['probability']:.4f}")
-
     return flagged
 
 
