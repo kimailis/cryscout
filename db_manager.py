@@ -128,15 +128,21 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Define stage filter
+    # Define stage filter for continuous looping and improvement
     stage_filter = "analyzed = 0"
     if stage == 'fetching':
-        stage_filter = "sigs_fetched = 0"
+        # Re-fetch data every 7 days to find new txs or leaks
+        stage_filter = "(sigs_fetched = 0 OR last_updated < datetime('now', '-7 days'))"
     elif stage == 'scanning':
-        stage_filter = "sigs_scanned = 0 AND sigs_fetched = 1"
+        # Re-scan every 3 days with potentially improved dictionaries/patterns
+        stage_filter = "(sigs_scanned = 0 OR last_updated < datetime('now', '-3 days')) AND sigs_fetched = 1"
     elif stage == 'analyzing':
-        stage_filter = "analyzed = 0 AND sigs_fetched = 1"
+        # Re-analyze every 1 day with potentially deeper lattice/algebraic parameters
+        stage_filter = "(analyzed = 0 OR last_updated < datetime('now', '-1 day')) AND sigs_fetched = 1"
     
+    # Exclude already compromised addresses
+    stage_filter = f"({stage_filter}) AND IFNULL(status, '') != 'Compromised'"
+
     if extra_filter:
         stage_filter += f" AND {extra_filter}"
 
@@ -173,7 +179,7 @@ def mark_stage_done(address, stage, worker_id):
 
     cursor.execute(f'''
     UPDATE addresses 
-    SET {column} = 1, processing_by = NULL, processing_since = NULL 
+    SET {column} = 1, processing_by = NULL, processing_since = NULL, last_updated = CURRENT_TIMESTAMP
     WHERE address = ? AND processing_by = ?
     ''', (address, worker_id))
     conn.commit()
