@@ -25,7 +25,7 @@ def get_service_info():
         with open(STATUS_FILE, 'r') as f:
             status = json.load(f)
             # Check for stale status
-            if time.time() - status.get('last_heartbeat', 0) > 10:
+            if time.time() - status.get('last_heartbeat', 0) > 30:
                 status['running'] = False
                 status['current_task'] = "Not Responding"
             return status
@@ -35,11 +35,23 @@ def get_service_info():
 def get_stats():
     # Mapping for dashboard
     db_stats = get_db_stats()
+    
+    # Add worker counts if possible
+    active_workers = 0
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM worker_status WHERE last_heartbeat > datetime('now', '-30 seconds')")
+        active_workers = c.fetchone()[0]
+        conn.close()
+    except: pass
+    
     return {
         "Total": db_stats['total'],
         "Analyzed": db_stats['analyzed'],
         "Dormant": db_stats['dormant'],
-        "Recovered": db_stats['keys_recovered']
+        "Recovered": db_stats['keys_recovered'],
+        "Workers": active_workers
     }
 
 def get_potential_targets():
@@ -93,9 +105,9 @@ def send_signal(sig):
 def start_service():
     # Execute detached
     try:
-        subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen([sys.executable, "cryshub.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except:
-        subprocess.Popen([sys.executable, "crypservice.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen([sys.executable, "cryshub.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def reset_analysis():
     try:
@@ -152,20 +164,34 @@ def draw_dashboard(stdscr):
             stdscr.addstr(7, 4, f"Addresses Analyzed:      {stats['Analyzed']}")
             stdscr.addstr(8, 4, f"Dormant Targets:         {stats['Dormant']}")
             stdscr.addstr(9, 4, f"Keys Recovered:          {stats['Recovered']}", curses.color_pair(1) if stats['Recovered']>0 else curses.A_NORMAL)
+            stdscr.addstr(10, 4, f"Active Workers:          {stats['Workers']}", curses.color_pair(4) if stats['Workers']>0 else curses.A_NORMAL)
             
-            if stats['Total'] > 0:
-                percent = (stats['Analyzed'] / stats['Total']) * 100
-                bar_len = min(width - 20, 50)
-                filled = int((percent / 100) * bar_len)
-                bar = "[" + "=" * filled + " " * (bar_len - filled) + "]"
-                stdscr.addstr(11, 4, f"Progress: {bar} {percent:.1f}%")
+            percent = (stats['Analyzed'] / stats['Total']) * 100
+            bar_len = min(width - 20, 50)
+            filled = int((percent / 100) * bar_len)
+            bar = "[" + "=" * filled + " " * (bar_len - filled) + "]"
+            stdscr.addstr(11, 4, f"Progress: {bar} {percent:.1f}%")
             
-            cpu_val = info.get('cpu_usage', 0)
-            ram_val = info.get('ram_usage', 0)
-            stdscr.addstr(13, 2, "System Constraints:", curses.A_UNDERLINE)
-            stdscr.addstr(14, 4, f"CPU Load: {cpu_val}%")
-            stdscr.addstr(15, 4, f"RAM Use:  {ram_val}%")
-            
+            # LIVE WORKER FLEET SECTION
+            worker_list = info.get('workers_detailed', [])
+            stdscr.addstr(13, 2, "Live Worker Fleet:", curses.A_UNDERLINE | curses.color_pair(4))
+            if not worker_list:
+                stdscr.addstr(14, 4, "No active workers detected.")
+            else:
+                stdscr.addstr(14, 4, f"{'Worker ID':<20} {'Current Task / Activity':<40} {'CPU':<6} {'RAM'}")
+                stdscr.addstr(15, 4, "-" * (width - 10))
+                for i, w in enumerate(worker_list):
+                    if i + 16 >= height - 12: break
+                    y = 16 + i
+                    wid = w.get('id', 'N/A')
+                    task = w.get('task', 'N/A')
+                    cpu = f"{w.get('cpu', 0):.1f}%"
+                    ram = f"{w.get('ram', 0):.1f}%"
+                    
+                    # Highlight 'STRIKING' workers
+                    style = curses.A_BOLD if "STRIKING" in task.upper() or "FLAGGED" in task.upper() else curses.A_NORMAL
+                    stdscr.addstr(y, 4, f"{wid[:19]:<20} {task[:39]:<40} {cpu:<6} {ram}", style)
+
             controls = "[S] Start | [T] Stop | [R] Restart | [A] Re-Analyze | [P] Potential | [K] Keys | [Q] Quit"
             stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)
 
@@ -251,7 +277,22 @@ def draw_text_dashboard():
         print(f"Addresses Analyzed:      {stats['Analyzed']}")
         print(f"Dormant Targets:         {stats['Dormant']}")
         print(f"Keys Recovered:          {stats['Recovered']}")
-        print(f"CPU Load: {info.get('cpu_usage', 0)}%  |  RAM Use: {info.get('ram_usage', 0)}%")
+        print(f"Active Workers:          {stats['Workers']}")
+        print("---")
+        print("Live Worker Fleet:")
+        worker_list = info.get('workers_detailed', [])
+        if not worker_list:
+            print("  No active workers.")
+        else:
+            print(f"  {'Worker ID':<20} {'Current Task / Activity':<40} {'CPU':<6} {'RAM'}")
+            for w in worker_list:
+                wid = w.get('id', 'N/A')
+                task = w.get('task', 'N/A')
+                cpu = f"{w.get('cpu', 0):.1f}%"
+                ram = f"{w.get('ram', 0):.1f}%"
+                print(f"  {wid[:19]:<20} {task[:39]:<40} {cpu:<6} {ram}")
+        
+        print(f"\nOverall CPU: {info.get('cpu_usage', 0)}%  |  RAM Use: {info.get('ram_usage', 0)}%")
         print("===" * 20)
         print(" Live Activity Log:")
         

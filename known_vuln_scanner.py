@@ -117,7 +117,14 @@ def scan_debian_keys(target_set):
     found = []
     checked = 0
     
+    SIGNAL_FILE = 'service_signal.txt'
     for pk_int, method in keys:
+        if os.path.exists(SIGNAL_FILE):
+            with open(SIGNAL_FILE, 'r') as f:
+                if f.read().strip() == 'STOP':
+                    print("  Stop signal detected in Debian scan. Aborting.")
+                    return found
+        
         addrs = privkey_to_all_addresses(pk_int)
         for addr in addrs:
             if addr in target_set:
@@ -126,7 +133,7 @@ def scan_debian_keys(target_set):
                 found.append((addr, pk_hex, f'Debian OpenSSL: {method}'))
         
         checked += 1
-        if checked % 50000 == 0:
+        if checked % 25000 == 0:
             print(f"  Progress: {checked}/{len(keys)} keys checked")
     
     print(f"  Debian scan complete: {len(found)} keys found")
@@ -137,7 +144,7 @@ def scan_debian_keys(target_set):
 # 2. Blockchain Bandit Sequential Keys
 # ============================================================
 
-def scan_sequential_keys(target_set, max_key=2**24, batch_report=500000):
+def scan_sequential_keys(target_set, max_key=2**24, batch_report=100000):
     """
     Scan sequential private keys 1 to max_key.
     The 'Blockchain Bandit' attacker historically swept keys 1 to ~2^32.
@@ -148,8 +155,15 @@ def scan_sequential_keys(target_set, max_key=2**24, batch_report=500000):
     print("=" * 60)
     
     found = []
+    SIGNAL_FILE = 'service_signal.txt'
     
     for i in range(1, max_key + 1):
+        if i % 10000 == 0 and os.path.exists(SIGNAL_FILE):
+            with open(SIGNAL_FILE, 'r') as f:
+                if f.read().strip() == 'STOP':
+                    print(f"  Stop signal detected in sequential scan (key {i}). Aborting.")
+                    return found
+        
         addrs = privkey_to_all_addresses(i)
         for addr in addrs:
             if addr in target_set:
