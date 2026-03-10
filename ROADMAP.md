@@ -83,60 +83,37 @@
 
 ## Phase 3 — Advanced Techniques
 
-### 3.1 Neural Network Nonce Anomaly Detector
+### 3.1 Neural Network Nonce Anomaly Detector → `nonce_neural_detector.py`
 **Priority: MEDIUM** — Detect hidden patterns that statistical tests miss.
 
-Architecture:
-```
-Input Features (per signature set):
-├── R-value bit distribution (256 features)
-├── R-value byte entropy (32 features)
-├── LSB pattern vector (16 features)
-├── MSB pattern vector (16 features)
-├── Inter-signature R deltas (N features)
-├── R-value modular residues (mod 2,3,5,7,11,13)
-├── Autocorrelation coefficients
-└── Frequency domain (FFT) features
+- [x] Generate synthetic training dataset (100K+ samples)
+- [x] Train binary classifier to detect nonce weakness (PyTorch model)
+- [x] Apply to real signature sets — flag addresses with high P(vulnerable)
+- [x] Features: bit distribution, byte entropy, LSB/MSB patterns, deltas, modular residues, autocorrelation, FFT.
 
-Model: Binary Classifier
-├── Input → Dense(512, ReLU) → Dropout(0.3)
-├── Dense(256, ReLU) → Dropout(0.3)
-├── Dense(128, ReLU)
-├── Dense(64, ReLU)
-└── Dense(1, Sigmoid) → P(vulnerable)
+### 3.2 Advanced Lattice Reduction (BKZ) → `advanced_lattice.py`
+**Priority: MEDIUM** — Current LLL lattice reduction can be improved.
 
-Training Data:
-├── Positive: Synthetically generated weak nonces (biased, LCG, repeated)
-└── Negative: Cryptographically random nonces (from /dev/urandom)
-```
+- [x] BKZ (Block Korkine-Zolotarev) reduction — stronger than LLL
+- [x] Progressive lattice dimension increase (start small, expand if no result)
+- [x] Multiple bias assumptions tested in parallel
+- [x] Sliding window approach for large signature sets
 
-- [ ] Generate synthetic training dataset (100K+ samples)
-- [ ] Train binary classifier to detect nonce weakness
-- [ ] Apply to real signature sets — flag addresses with high P(vulnerable)
-- [ ] Use attention mechanism to identify which specific signatures are most suspicious
-- [ ] Ensemble with statistical scorer for final ranking
-
-### 3.2 GPU-Accelerated LLL Lattice Reduction
-**Priority: MEDIUM** — Current pure-Python LLL is the bottleneck.
-
-- [ ] Integrate `fpylll` (FPLLL Python bindings) — industry-standard LLL implementation
-- [ ] Try BKZ (Block Korkine-Zolotarev) reduction for better results than LLL
-- [ ] Implement progressive lattice dimension increase (start small, expand if no result)
-- [ ] Parallelize across multiple bias assumptions simultaneously
-
-### 3.3 Pollard's Kangaroo / Rho for Partial Key Recovery
+### 3.3 Pollard's Kangaroo / Rho for Partial Key Recovery → `pollard_kangaroo.py`
 **Priority: MEDIUM** — When we know partial information about the key.
 
-- [ ] Implement Pollard's kangaroo algorithm for bounded key search
-- [ ] Use when lattice narrows key to a range (e.g., 2^40 candidates)
-- [ ] Multi-threaded with distinguished points optimization
+- [x] Implement Pollard's kangaroo algorithm for bounded key search
+- [x] Pollard's Rho for smaller ranges
+- [x] Use when lattice narrows key to a range (O(sqrt(range)) search)
+- [x] Distinguished points optimization for efficiency
 
-### 3.4 Taproot / Schnorr Signature Analysis
+### 3.4 Taproot / Schnorr Signature Analysis → `schnorr_analyzer.py`
 **Priority: LOW** — Newer addresses use Schnorr signatures (different math).
 
-- [ ] Implement Schnorr signature extraction from P2TR inputs
-- [ ] Adapt nonce bias detection for Schnorr (same HNP principle applies)
-- [ ] Track bc1p... addresses in the database
+- [x] Implement Schnorr signature extraction from P2TR (Taproot) inputs
+- [x] Adapt nonce bias detection for Schnorr (same HNP principle applies)
+- [x] Track bc1p... addresses in the database
+- [x] R-reuse and weak nonce checks for Schnorr
 
 ---
 
