@@ -159,6 +159,39 @@ class AsyncCryScoutHub:
             except: pass
         return False
 
+    async def check_completion_cycle(self):
+        """Monitor for Phase 1 completion and trigger Deep Scan (Phase 2)."""
+        def query_db():
+            conn = sqlite3.connect('cryscout.db', timeout=20)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM addresses WHERE sigs_fetched = 1")
+            total_fetched = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM addresses WHERE analyzed = 1 AND sigs_fetched = 1")
+            total_analyzed = cursor.fetchone()[0]
+            conn.close()
+            return total_fetched, total_analyzed
+
+        try:
+            total, analyzed = await asyncio.to_thread(query_db)
+            if total > 0 and analyzed >= total:
+                # Check if workers are idle
+                worker_details = await self.get_worker_details()
+                busy_workers = [w for w in worker_details if "idle" not in w['task'].lower() and "evolving" not in w['task'].lower() and "fetching" not in w['task'].lower()]
+                
+                if not busy_workers:
+                    self.log("Phase 1 Complete. Initiating Deep Scan Cycle (Phase 2)...")
+                    def reset_db():
+                        conn = sqlite3.connect('cryscout.db', timeout=20)
+                        cursor = conn.cursor()
+                        # Reset scanning flags but KEEP fail_att and signatures
+                        cursor.execute("UPDATE addresses SET analyzed = 0, neural_scanned = 0, tcg_scanned = 0 WHERE sigs_fetched = 1")
+                        conn.commit()
+                        conn.close()
+                    await asyncio.to_thread(reset_db)
+                    self.log("Deep Scan Phase 2 active. Workers re-claiming targets.")
+        except Exception as e:
+            self.log(f"Cycle Check Error: {e}")
+
     async def run(self):
         self.log("Async CryScout Hub Online.")
         # Start initial workers
@@ -172,6 +205,9 @@ class AsyncCryScoutHub:
             try:
                 if await self.check_stop_signal(): break
                 await self.check_workers()
+                
+                # Check for cycle completion
+                await self.check_completion_cycle()
                 
                 # Maintenance
                 current_counts = { w: 0 for w in WORKER_TYPES }

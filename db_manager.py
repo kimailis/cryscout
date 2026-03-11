@@ -430,13 +430,16 @@ def get_stats():
     # Small R (<128 bits): 0.005
     # LSB Bias (>8 bits): 0.001
     
+    cursor.execute("SELECT address, fail_att FROM addresses WHERE fail_att != ''")
+    fail_atts = {row[0]: row[1] for row in cursor.fetchall()}
+    
     cursor.execute("SELECT address, type, details, severity FROM vulnerabilities")
     vulns = cursor.fetchall()
     
     # Group by address for better per-target probability
     addr_probs = {}
     for addr, v_type, v_details, v_sev in vulns:
-        if addr not in addr_probs: addr_probs[addr] = 1.0 # Fail prob for this addr
+        if addr not in addr_probs: addr_probs[addr] = 1.0 # Initial fail prob for this addr
         
         p = 0.0001
         if 'R-Reuse' in v_type:
@@ -450,8 +453,18 @@ def get_stats():
         elif 'LSB Bias' in v_type:
             p = 0.01 if v_sev == 'High' else 0.002
         elif 'TCG Norm' in v_type:
-            p = 0.001 # Small bias but valid collision
+            p = 0.001 
             
+        # Bayesian recalibration: every failed attack reduces p_success
+        f_str = fail_atts.get(addr, "")
+        if f_str:
+            # Count distinct attack attempts recorded in fail_att
+            # fail_att usually looks like '[1.x][2.x]...'
+            import re
+            attacks = set(re.findall(r'\[(\d+)\.', f_str))
+            for _ in range(len(attacks)):
+                p *= 0.3 # Reduce probability by 70% per failed distinct attack type
+                
         addr_probs[addr] *= (1.0 - p)
     
     # Calculate fleet-wide success probability
