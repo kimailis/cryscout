@@ -180,13 +180,14 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
         stage_filter = "tcg_scanned = 0 AND sigs_fetched = 1"
     elif stage == 'brainwallet':
         # Brainwallet scan: Any address not yet brainwallet-scanned
-        stage_filter = "brainwallet_scanned = 0"
+        stage_filter = "brainwallet_scanned = 0 AND sigs_fetched = 1"
     elif stage == 'bruteforce':
         # Brute-force scans: Only if ALL 7 other techniques have failed at least 3 times
         # Format in DB is [ID.count],[ID.count]...
         # We check for [1.N] where N >= 3, [2.N] where N >= 3, etc.
         # This regex-like glob ensures we only pick up targets that have exhausted all other options.
         stage_filter = (
+            "sigs_fetched = 1 AND "
             "fail_att GLOB '*[[]1.[3-9][]]*' AND "
             "fail_att GLOB '*[[]2.[3-9][]]*' AND "
             "fail_att GLOB '*[[]3.[3-9][]]*' AND "
