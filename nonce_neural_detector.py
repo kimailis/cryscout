@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
 """
-Phase 3.1 — Neural Network Nonce Anomaly Detector
+Phase 3.1 — Neural Network Nonce Anomaly Detector & Spectral Bias
 
 Uses a PyTorch binary classifier trained on synthetic data to detect
 hidden patterns in ECDSA nonce (R-value) distributions that statistical
-tests might miss.
+tests might miss. Also implements an LSTM model for Spectral Bias detection.
 
 Architecture:
-  Input Features (per signature set):
-  ├── R-value bit distribution (256 features)
-  ├── R-value byte entropy (32 features)
-  ├── LSB pattern vector (16 features)
-  ├── MSB pattern vector (16 features)
-  ├── Inter-signature R deltas (32 features)
-  ├── R-value modular residues mod 2,3,5,7,11,13 (6 features)
-  ├── Autocorrelation coefficients (16 features)
-  └── Frequency domain (FFT magnitude) (32 features)
-
-  Model: Binary Classifier → P(vulnerable)
+  - Feed-Forward Model: Binary Classifier → P(vulnerable)
+  - Spectral Bias LSTM: Sequence Prediction → Next bits of PRNG sequence
 """
 import os
 import json
@@ -38,10 +29,11 @@ from reverse_entropy_analyzer import get_reverse_entropy_features
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 FEATURE_DIM = 438  # 406 original + 32 reverse entropy
 MODEL_PATH = 'nonce_anomaly_model.pt'
+LSTM_MODEL_PATH = 'spectral_bias_lstm.pt'
 
 
 # ============================================================
-# Feature Extraction
+# Feature Extraction (Feed-Forward)
 # ============================================================
 
 def extract_features(r_values):
@@ -101,7 +93,6 @@ def extract_features(r_values):
     for prime in [2, 3, 5, 7, 11, 13]:
         residues = [r % prime for r in r_values]
         counts = Counter(residues)
-        # Chi-squared statistic vs uniform
         expected = n / prime
         chi2 = sum((counts.get(i, 0) - expected) ** 2 / expected for i in range(prime))
         features.append(min(chi2 / 100.0, 1.0))  # Normalize
@@ -119,15 +110,11 @@ def extract_features(r_values):
 
     # 8. FFT magnitude (32 features): frequency domain analysis
     if len(r_values) >= 4:
-        # Use bit-lengths as a simpler signal for FFT
         signal = [float(r.bit_length()) for r in r_values[:256]]
-        # Pad to power of 2
         pad_len = 1
         while pad_len < len(signal):
             pad_len *= 2
         signal.extend([0.0] * (pad_len - len(signal)))
-
-        # Manual DFT for first 32 frequency bins
         N = len(signal)
         for k in range(32):
             real = sum(signal[n_] * math.cos(2 * math.pi * k * n_ / N) for n_ in range(N))
@@ -149,19 +136,31 @@ def extract_features(r_values):
 
 
 # ============================================================
-# Synthetic Data Generation
+# Sequence Extraction (LSTM)
+# ============================================================
+
+def extract_sequence(r_values, max_len=20):
+    """Extract a bit sequence for the LSTM model. Focuses on the lowest 64 bits to find PRNG connections."""
+    seq = []
+    for r in r_values[:max_len]:
+        bits = [(r >> i) & 1 for i in range(64)]
+        seq.append(bits)
+    # Pad if necessary
+    while len(seq) < max_len:
+        seq.append([0]*64)
+    return seq
+
+
+# ============================================================
+# Synthetic Data Generation & Mutation Engine
 # ============================================================
 
 def generate_random_r_values(count):
-    """Generate cryptographically random R-values (SECURE nonces → label 0)."""
     return [random.randint(1, P - 1) for _ in range(count)]
 
-
 def generate_biased_r_values(count, bias_type='lsb'):
-    """Generate biased R-values (WEAK nonces → label 1)."""
     values = []
     if bias_type == 'lcg':
-        # LCG nonce: k_{i+1} = a*k_i + b mod P
         a = random.randint(1, P - 1)
         b = random.randint(1, P - 1)
         k = random.randint(1, P - 1)
@@ -171,73 +170,98 @@ def generate_biased_r_values(count, bias_type='lsb'):
         return values
     
     if bias_type == 'lfsr':
-        # LFSR-like behavior (linear recurrence over GF(2))
-        # Simplified: just a shift and xor
         state = random.randint(1, (1 << 256) - 1)
         for _ in range(count):
             values.append(state % P)
-            # Feedback: xor bits 0, 2, 3, 5
             fb = (state ^ (state >> 2) ^ (state >> 3) ^ (state >> 5)) & 1
             state = (state >> 1) | (fb << 255)
         return values
 
     for _ in range(count):
         if bias_type == 'lsb':
-            # LSB bias: bottom 8 bits always the same
             r = random.randint(1, P - 1)
             r = (r & ~0xFF) | 0x42
             values.append(r)
         elif bias_type == 'small':
-            # Small nonce: only 128 bits of entropy
             r = random.randint(1, 1 << 128)
             values.append(r)
         elif bias_type == 'repeated':
-            # Some repeated R values
             base_r = random.randint(1, P - 1)
             if random.random() < 0.3:
                 values.append(base_r)
             else:
                 values.append(random.randint(1, P - 1))
         elif bias_type == 'msb_bias':
-            # MSB bias: top 16 bits always small
             r = random.randint(1, 1 << 240)
             values.append(r)
         elif bias_type == 'pattern':
-            # Alternating pattern in bytes
             pattern = random.randint(0, 255)
             r_bytes = bytes([pattern, 255 - pattern] * 16)
             r = int.from_bytes(r_bytes, 'big') % P
             values.append(r if r > 0 else 1)
         elif bias_type == 'low_spectral':
-            # Sum of few sinusoids (low spectral entropy)
-            # We simulate this by choosing R values that are close in FFT domain
-            # (Simplified: just values with many repeating bit patterns)
             r = sum((random.randint(0, 1) << (i * 8)) for i in range(32) if i % 4 == 0)
             values.append(r % P if r > 0 else 1)
     return values
 
+def generate_mutated_r_values(count):
+    """Generates heavily mutated, composite biased sequences to force continuous AI adaptation."""
+    values = []
+    # Mix 1 to 3 random bias types together
+    mutations = random.sample(['lsb', 'small', 'msb_bias', 'low_spectral', 'bit_flip', 'periodic_bias', 'block_mask'], k=random.randint(1, 3))
+    
+    # Start with a base generator (either random, LCG, or LFSR)
+    base_gen = random.choice(['random', 'lcg', 'lfsr'])
+    if base_gen == 'random':
+        base_seq = generate_random_r_values(count)
+    else:
+        base_seq = generate_biased_r_values(count, bias_type=base_gen)
+        
+    for i in range(count):
+        r = base_seq[i]
+        # Apply selected genetic mutations to the sequence
+        for m in mutations:
+            if m == 'lsb':
+                mask = (1 << random.randint(1, 12)) - 1
+                val = random.randint(0, mask)
+                r = (r & ~mask) | val
+            elif m == 'small':
+                r = r % (1 << random.randint(64, 224))
+            elif m == 'msb_bias':
+                r = r | (1 << random.randint(200, 255))
+            elif m == 'low_spectral':
+                if i % 2 == 0: r = r ^ (1 << (i % 256))
+            elif m == 'bit_flip':
+                if random.random() < 0.1:
+                    r = r ^ (1 << random.randint(0, 255))
+            elif m == 'periodic_bias':
+                # Bias that changes periodically
+                if (i // 5) % 2 == 0:
+                    r = (r & ~0xFFF) | 0xABC
+            elif m == 'block_mask':
+                # Mask out a specific 32-bit block
+                block_start = random.randint(0, 7) * 32
+                r = r & ~(0xFFFFFFFF << block_start)
+        values.append(r if r > 0 else 1)
+    return values
 
 def generate_training_data(n_samples=50000, sigs_per_sample=20):
-    """Generate labeled training data: (features, label) pairs."""
-    print(f"  Generating {n_samples} training samples...")
-    X = []
-    y = []
-
-    bias_types = ['lsb', 'small', 'lcg', 'lfsr', 'repeated', 'msb_bias', 'pattern', 'entropy_reversal', 'low_spectral']
+    print(f"  Generating {n_samples} training samples for FFNN (with Mutations)...")
+    X, y = [], []
+    bias_types = ['lsb', 'small', 'lcg', 'lfsr', 'repeated', 'msb_bias', 'pattern', 'entropy_reversal', 'low_spectral', 'mutated']
 
     for i in range(n_samples):
         if i % 2 == 0:
-            # Secure (label 0)
             r_vals = generate_random_r_values(sigs_per_sample)
             label = 0
         else:
-            # Weak (label 1)
             bias = random.choice(bias_types)
             if bias == 'entropy_reversal':
-                # Low Permutation Entropy
                 base = random.randint(1, P//2)
                 step = random.randint(1, 1000000)
                 r_vals = [(base + i * step) % P for i in range(sigs_per_sample)]
+            elif bias == 'mutated':
+                r_vals = generate_mutated_r_values(sigs_per_sample)
             else:
                 r_vals = generate_biased_r_values(sigs_per_sample, bias_type=bias)
             label = 1
@@ -247,15 +271,51 @@ def generate_training_data(n_samples=50000, sigs_per_sample=20):
             X.append(feats)
             y.append(label)
 
-        if (i + 1) % 10000 == 0:
-            print(f"    {i + 1}/{n_samples} samples generated")
+    return X, y
 
+
+def generate_lstm_training_data(n_samples=10000, seq_len=10):
+    print(f"  Generating {n_samples} training samples for LSTM (with Mutations)...")
+    X, y = [], []
+    # We train the LSTM to predict the next 64 bits of a sequence given previous bits
+    for i in range(n_samples):
+        if i % 2 == 0:
+            r_vals = generate_random_r_values(seq_len + 1)
+        else:
+            if random.random() < 0.3:
+                r_vals = generate_mutated_r_values(seq_len + 1)
+            else:
+                # Generate LCG or LFSR sequences which have strong spectral bias / predictability
+                r_vals = generate_biased_r_values(seq_len + 1, bias_type=random.choice(['lcg', 'lfsr']))
+        
+        seq = extract_sequence(r_vals, max_len=seq_len + 1)
+        X.append(seq[:-1]) # Input sequence
+        y.append(seq[-1])  # Target next step
     return X, y
 
 
 # ============================================================
-# Neural Network Model
+# Neural Network Models & Storage
 # ============================================================
+
+_ff_model_cache = None
+_lstm_model_cache = None
+_last_load_time = 0
+
+def save_model_atomic(model, path):
+    """Saves a model to a temporary file and then replaces the target path atomically."""
+    import tempfile
+    temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)) or ".")
+    try:
+        torch.save(model.state_dict(), temp_path)
+        os.close(temp_fd)
+        os.replace(temp_path, path)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try: os.close(temp_fd) 
+            except: pass
+            os.remove(temp_path)
+        raise e
 
 class NonceAnomalyDetector(nn.Module):
     def __init__(self, input_dim=FEATURE_DIM):
@@ -278,16 +338,28 @@ class NonceAnomalyDetector(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class SpectralBiasLSTM(nn.Module):
+    def __init__(self, input_size=64, hidden_size=128, num_layers=2):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
+        self.fc = nn.Linear(hidden_size, input_size)
+        self.sigmoid = nn.Sigmoid()
 
-def train_model(epochs=30, batch_size=256, n_samples=50000):
-    """Train the anomaly detector on synthetic data."""
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        # We only care about the prediction after the last step
+        last_out = out[:, -1, :]
+        return self.sigmoid(self.fc(last_out))
+
+
+def train_model(epochs=30, batch_size=256, n_samples=50000, model=None):
     print("=" * 60)
-    print("TRAINING NONCE ANOMALY DETECTOR")
+    print(f"EVOLVING FFNN NONCE ANOMALY DETECTOR ({n_samples} samples)")
     print("=" * 60)
 
     X, y = generate_training_data(n_samples=n_samples)
 
-    # Split train/val
     split = int(0.8 * len(X))
     X_train, X_val = X[:split], X[split:]
     y_train, y_val = y[:split], y[split:]
@@ -300,52 +372,126 @@ def train_model(epochs=30, batch_size=256, n_samples=50000):
     train_ds = TensorDataset(X_train_t, y_train_t)
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 
-    model = NonceAnomalyDetector()
+    if model is None:
+        model = NonceAnomalyDetector()
+        if os.path.exists(MODEL_PATH):
+            try:
+                model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
+            except:
+                pass # Start fresh if corrupt
+                
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.BCELoss()
-
-    print(f"  Training on {len(X_train)} samples, validating on {len(X_val)}")
 
     best_val_acc = 0
     for epoch in range(epochs):
         model.train()
-        total_loss = 0
         for xb, yb in train_dl:
             pred = model(xb)
             loss = criterion(pred, yb)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
 
-        # Validation
         model.eval()
         with torch.no_grad():
             val_pred = model(X_val_t)
-            val_loss = criterion(val_pred, y_val_t).item()
             val_acc = ((val_pred > 0.5).float() == y_val_t).float().mean().item()
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), MODEL_PATH)
+            save_model_atomic(model, MODEL_PATH)
 
-        if (epoch + 1) % 5 == 0:
-            print(f"  Epoch {epoch+1}/{epochs} — Loss: {total_loss/len(train_dl):.4f}, "
-                  f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-
-    print(f"  Training complete. Best validation accuracy: {best_val_acc:.4f}")
-    print(f"  Model saved to {MODEL_PATH}")
+    print(f"  FFNN Training complete. Best validation accuracy: {best_val_acc:.4f}")
     return model
 
 
-def load_model():
-    """Load a trained model from disk."""
-    model = NonceAnomalyDetector()
-    if os.path.exists(MODEL_PATH):
-        model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
+def train_lstm_model(epochs=20, batch_size=128, n_samples=10000, model=None):
+    print("=" * 60)
+    print(f"EVOLVING LSTM SPECTRAL BIAS DETECTOR ({n_samples} samples)")
+    print("=" * 60)
+
+    X, y = generate_lstm_training_data(n_samples=n_samples)
+    split = int(0.8 * len(X))
+    
+    X_train_t = torch.FloatTensor(X[:split])
+    y_train_t = torch.FloatTensor(y[:split])
+    X_val_t = torch.FloatTensor(X[split:])
+    y_val_t = torch.FloatTensor(y[split:])
+
+    train_ds = TensorDataset(X_train_t, y_train_t)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+    if model is None:
+        model = SpectralBiasLSTM()
+        if os.path.exists(LSTM_MODEL_PATH):
+            try:
+                model.load_state_dict(torch.load(LSTM_MODEL_PATH, weights_only=True))
+            except:
+                pass
+
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.BCELoss()
+
+    best_val_loss = float('inf')
+    for epoch in range(epochs):
+        model.train()
+        for xb, yb in train_dl:
+            pred = model(xb)
+            loss = criterion(pred, yb)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
         model.eval()
-        return model
-    return None
+        with torch.no_grad():
+            val_pred = model(X_val_t)
+            val_loss = criterion(val_pred, y_val_t).item()
+            
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_model_atomic(model, LSTM_MODEL_PATH)
+            
+    print(f"  LSTM Training complete. Best validation loss: {best_val_loss:.4f}")
+    return model
+
+
+def load_models(force_reload=False):
+    global _ff_model_cache, _lstm_model_cache, _last_load_time
+    
+    ff_exists = os.path.exists(MODEL_PATH)
+    lstm_exists = os.path.exists(LSTM_MODEL_PATH)
+    
+    if not force_reload and _ff_model_cache and _lstm_model_cache:
+        mtime_ff = os.path.getmtime(MODEL_PATH) if ff_exists else 0
+        mtime_lstm = os.path.getmtime(LSTM_MODEL_PATH) if lstm_exists else 0
+        if mtime_ff <= _last_load_time and mtime_lstm <= _last_load_time:
+            return _ff_model_cache, _lstm_model_cache
+
+    _ff_model_cache = NonceAnomalyDetector()
+    if ff_exists:
+        try:
+            _ff_model_cache.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
+            _ff_model_cache.eval()
+        except Exception as e:
+            print(f" [!] Error loading FFNN model: {e}")
+            _ff_model_cache = train_model()
+    else:
+        _ff_model_cache = train_model()
+        
+    _lstm_model_cache = SpectralBiasLSTM()
+    if lstm_exists:
+        try:
+            _lstm_model_cache.load_state_dict(torch.load(LSTM_MODEL_PATH, weights_only=True))
+            _lstm_model_cache.eval()
+        except Exception as e:
+            print(f" [!] Error loading LSTM model: {e}")
+            _lstm_model_cache = train_lstm_model()
+    else:
+        _lstm_model_cache = train_lstm_model()
+        
+    _last_load_time = time.time()
+    return _ff_model_cache, _lstm_model_cache
 
 
 # ============================================================
@@ -353,12 +499,7 @@ def load_model():
 # ============================================================
 
 def scan_addresses_with_nn(addresses=None):
-    """
-    Apply the trained neural network to real signature sets.
-    Flag addresses with high P(vulnerable) for deeper analysis.
-    """
     if addresses is None:
-        # Backward compatibility if run directly
         conn = get_connection()
         c = conn.cursor()
         c.execute("""
@@ -369,64 +510,67 @@ def scan_addresses_with_nn(addresses=None):
             ORDER BY sig_count DESC
             LIMIT 20
         """)
-        addresses_with_count = c.fetchall()
+        addresses = [a[0] for a in c.fetchall()]
         conn.close()
-        addresses = [a[0] for a in addresses_with_count]
 
     if not addresses:
         return []
 
-    # Load or train model
-    model = load_model()
-    if model is None:
-        print("  No trained model found — training now...")
-        model = train_model(epochs=30, n_samples=50000)
-        model = load_model()
-
-    print(f"  Scanning {len(addresses)} addresses with neural network...")
+    print(f"  Scanning {len(addresses)} addresses with Neural Networks (FFNN & LSTM Spectral Bias)...")
+    ff_model, lstm_model = load_models()
 
     conn = get_connection()
     c = conn.cursor()
     flagged = []
     
     for addr in addresses:
-        c.execute("SELECT r_int FROM signatures WHERE address = ?", (addr,))
-        rows = c.fetchall()
-        r_values = [int(r[0]) for r in rows if r[0]]
+        c.execute("SELECT r_int FROM signatures WHERE address = ? ORDER BY id ASC", (addr,))
+        r_values = [int(r[0]) for r in c.fetchall() if r[0]]
 
         if len(r_values) < 4:
             continue
 
+        # 1. FFNN Feature extraction
         feats = extract_features(r_values)
-        if feats is None:
-            continue
+        prob_ff = 0
+        if feats:
+            with torch.no_grad():
+                prob_ff = ff_model(torch.FloatTensor([feats])).item()
 
-        with torch.no_grad():
-            x = torch.FloatTensor([feats])
-            prob = model(x).item()
+        # 2. LSTM Spectral Bias extraction
+        prob_spectral = 0
+        if len(r_values) >= 5:
+            seq = extract_sequence(r_values, max_len=len(r_values))
+            input_seq = torch.FloatTensor([seq[:-1]])
+            target_out = torch.FloatTensor(seq[-1])
+            with torch.no_grad():
+                pred = lstm_model(input_seq).squeeze(0)
+                # Calculate mean squared error between prediction and actual next bits
+                # Lower MSE = highly predictable = Spectral Bias
+                mse = ((pred - target_out) ** 2).mean().item()
+                # Convert MSE to a probability score (arbitrary threshold scaling for demonstration)
+                # Random guessing MSE is ~0.25. If MSE < 0.15, it's highly predictable.
+                prob_spectral = max(0, min(1, (0.25 - mse) * 10))
 
-        if prob > 0.5:
-            risk = "HIGH" if prob > 0.8 else "MEDIUM"
-            print(f"  ⚠ {addr[:35]}... P(vuln)={prob:.4f} [{risk}]")
-            
-            # Breakdown of Reverse Entropy Metrics
-            rev_entropy_feats = get_reverse_entropy_features(r_values)
-            pe3 = rev_entropy_feats[0]
-            spec_en = rev_entropy_feats[13]
-            lz_lsb = rev_entropy_feats[18]
+        prob_max = max(prob_ff, prob_spectral)
+        if prob_max > 0.5:
+            risk = "HIGH" if prob_max > 0.8 else "MEDIUM"
+            print(f"  ⚠ {addr[:35]}... P(vuln)={prob_max:.4f} (FFNN: {prob_ff:.2f}, LSTM: {prob_spectral:.2f}) [{risk}]")
             
             flagged.append({
                 'address': addr,
-                'probability': prob,
+                'probability': prob_max,
                 'risk': risk,
-                'entropy_metrics': {'pe': pe3, 'spec_en': spec_en, 'lz': lz_lsb}
             })
-            add_finding(addr, 'Neural Net Anomaly',
-                        details=f'P(vulnerable)={prob:.4f}, PE={pe3:.2f}, SpecEn={spec_en:.2f}',
-                        severity='High' if prob > 0.8 else 'Medium')
-        else:
-            # print(f"  ✓ {addr[:35]}... P(vuln)={prob:.4f} [OK]")
-            pass
+            
+            if prob_spectral > 0.5:
+                add_finding(addr, 'Spectral Bias Anomaly (LSTM)',
+                            details=f'LSTM Predictability P={prob_spectral:.4f}',
+                            severity='High' if prob_spectral > 0.8 else 'Medium')
+            elif prob_ff > 0.5:
+                add_finding(addr, 'Neural Net Anomaly',
+                            details=f'FFNN P(vulnerable)={prob_ff:.4f}',
+                            severity='High' if prob_ff > 0.8 else 'Medium')
 
     conn.close()
     return flagged
@@ -437,5 +581,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 50000
         train_model(n_samples=n)
+        train_lstm_model(n_samples=n//5)
     else:
         scan_addresses_with_nn()
