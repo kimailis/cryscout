@@ -85,21 +85,33 @@ def get_potential_targets():
 
 def get_recovered_keys():
     keys = []
+    total_bal = 0.0
     try:
         conn = get_connection()
         c = conn.cursor()
-        c.execute("SELECT address, privkey_hex, method FROM recovered_keys ORDER BY id DESC LIMIT 20")
+        query = '''
+        SELECT r.address, r.privkey_hex, r.method, COALESCE(a.current_balance, a.balance, 0) as bal
+        FROM recovered_keys r
+        LEFT JOIN addresses a ON r.address = a.address
+        ORDER BY r.found_at DESC LIMIT 50
+        '''
+        c.execute(query)
         rows = c.fetchall()
         for r in rows:
             keys.append({
                 "Address": r[0],
                 "Key": r[1][:26] + "..." if r[1] else "Unknown",
-                "Method": r[2]
+                "Method": r[2],
+                "Balance": r[3]
             })
+            total_bal += r[3] if r[3] else 0.0
         conn.close()
     except Exception as e:
-        keys.append({"Address": "Error", "Key": "N/A", "Method": str(e)})
-    return keys
+        # If table doesn't exist yet, it's not really an error for the user, just 'None'
+        if "no such table" in str(e).lower():
+            return [], 0.0
+        keys.append({"Address": "None", "Key": "N/A", "Method": str(e), "Balance": 0})
+    return keys, total_bal
 
 def send_signal(sig):
     with open(SIGNAL_FILE, 'w') as f:
@@ -272,15 +284,26 @@ def draw_dashboard(stdscr):
 
         elif mode == "KEYS":
             stdscr.addstr(2, 2, "RECOVERED KEYS (SUCCESS!):", curses.A_UNDERLINE | curses.color_pair(1))
-            keys = get_recovered_keys()
+            keys, total_btc = get_recovered_keys()
+            
             if not keys:
-                stdscr.addstr(4, 4, "No keys recovered yet. Keep scanning...", curses.color_pair(3))
+                stdscr.addstr(4, 4, "None.", curses.color_pair(3))
+                row_count = 0
             else:
-                stdscr.addstr(4, 4, f"{'Address':<35} {'Private Key':<30} {'Method'}")
+                stdscr.addstr(4, 4, f"{'Address':<35} {'Private Key':<30} {'Balance':<15} {'Method'}")
                 stdscr.addstr(5, 4, "-" * (width - 8))
+                row_count = 0
                 for i, k in enumerate(keys):
                     if i + 6 >= height - 12: break
-                    stdscr.addstr(i + 6, 4, f"{k['Address'][:34]:<35} {k['Key'][:29]:<30} {k['Method'][:25]}", curses.color_pair(1))
+                    bal_str = f"{k.get('Balance', 0):.4f} BTC"
+                    stdscr.addstr(i + 6, 4, f"{k['Address'][:34]:<35} {k['Key'][:29]:<30} {bal_str:<15} {k['Method'][:20]}", curses.color_pair(1))
+                    row_count += 1
+                
+            # Summary line
+            summary_y = 6 + row_count + 1
+            if summary_y < height - 12:
+                stdscr.addstr(summary_y, 4, "-" * (width - 8))
+                stdscr.addstr(summary_y + 1, 4, f"TOTAL: {len(keys)} keys recovered | {total_btc:.4f} BTC accessible", curses.A_BOLD | curses.color_pair(1))
             
             controls = "[B] Back to Main | [Q] Quit"
             stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)

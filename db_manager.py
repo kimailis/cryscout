@@ -151,6 +151,12 @@ def init_db():
     except sqlite3.OperationalError:
         pass # Column already exists
 
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN vortex_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
     conn.close()
 
 def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
@@ -178,6 +184,9 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     elif stage == 'tcg':
         # TCG scans: Target addresses with sigs that haven't been TCG scanned
         stage_filter = "tcg_scanned = 0 AND sigs_fetched = 1"
+    elif stage == 'vortex':
+        # Vortex Harmonic & 3-6-9 scans: Target addresses not yet vortex_scanned
+        stage_filter = "vortex_scanned = 0 AND sigs_fetched = 1"
     elif stage == 'brainwallet':
         # Brainwallet scan: Any address not yet brainwallet-scanned
         stage_filter = "brainwallet_scanned = 0 AND sigs_fetched = 1"
@@ -237,6 +246,8 @@ def mark_stage_done(address, stage, worker_id):
         column = "neural_scanned"
     elif stage == 'tcg':
         column = "tcg_scanned"
+    elif stage == 'vortex':
+        column = "vortex_scanned"
     elif stage == 'brainwallet':
         column = "brainwallet_scanned"
 
@@ -399,83 +410,86 @@ def get_stats():
     cursor = conn.cursor()
     
     stats = {}
-    cursor.execute("SELECT COUNT(*) FROM addresses")
-    stats['total'] = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM addresses WHERE analyzed = 1")
-    stats['analyzed'] = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM addresses WHERE status = 'Dormant'")
-    stats['dormant'] = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM vulnerabilities")
-    stats['vulnerabilities'] = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM recovered_keys")
-    stats['keys_recovered'] = cursor.fetchone()[0]
+    try:
+        cursor.execute("SELECT COUNT(*) FROM addresses")
+        stats['total'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM addresses WHERE analyzed = 1")
+        stats['analyzed'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM addresses WHERE status = 'Dormant'")
+        stats['dormant'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM vulnerabilities")
+        stats['vulnerabilities'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM recovered_keys")
+        stats['keys_recovered'] = cursor.fetchone()[0]
 
-    # New detailed stats
-    cursor.execute("SELECT COUNT(*) FROM addresses WHERE neural_scanned = 1")
-    stats['neural_scanned'] = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM addresses WHERE fail_att != ''")
-    stats['attacked'] = cursor.fetchone()[0]
+        # New detailed stats
+        cursor.execute("SELECT COUNT(*) FROM addresses WHERE neural_scanned = 1")
+        stats['neural_scanned'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM addresses WHERE fail_att != ''")
+        stats['attacked'] = cursor.fetchone()[0]
+    except sqlite3.OperationalError:
+        stats['total'] = stats.get('total', 0)
+        stats['analyzed'] = stats.get('analyzed', 0)
+        stats['dormant'] = stats.get('dormant', 0)
+        stats['vulnerabilities'] = stats.get('vulnerabilities', 0)
+        stats['keys_recovered'] = stats.get('keys_recovered', 0)
+        stats['neural_scanned'] = stats.get('neural_scanned', 0)
+        stats['attacked'] = stats.get('attacked', 0)
     
     # Calculate estimated probability of success
-    # 1 - Product(1 - p_i)
-    # p_i thresholds:
-    # R-Reuse (not same Z): 0.99
-    # R-Reuse (same Z): 0.01 (might hit if we find another sig)
-    # Spectral Bias (High): 0.05
-    # Neural Anomaly (High): 0.02
-    # Small R (<128 bits): 0.005
-    # LSB Bias (>8 bits): 0.001
-    
-    cursor.execute("SELECT address, fail_att FROM addresses WHERE fail_att != ''")
-    fail_atts = {row[0]: row[1] for row in cursor.fetchall()}
-    
-    cursor.execute("SELECT address, type, details, severity FROM vulnerabilities")
-    vulns = cursor.fetchall()
-    
-    # Group by address for better per-target probability
-    addr_probs = {}
-    for addr, v_type, v_details, v_sev in vulns:
-        if addr not in addr_probs: addr_probs[addr] = 1.0 # Initial fail prob for this addr
+    stats['success_prob'] = 0.0
+    try:
+        cursor.execute("SELECT address, fail_att FROM addresses WHERE fail_att != ''")
+        fail_atts = {row[0]: row[1] for row in cursor.fetchall()}
         
-        p = 0.0001
-        if 'R-Reuse' in v_type:
-            p = 0.99 if 'Different Z' in str(v_details) else 0.01
-        elif 'Spectral' in v_type:
-            p = 0.1 if v_sev == 'High' else 0.02
-        elif 'Neural' in v_type:
-            p = 0.05 if v_sev == 'High' else 0.01
-        elif 'Small R' in v_type:
-            p = 0.02 if v_sev == 'High' else 0.005
-        elif 'LSB Bias' in v_type:
-            p = 0.01 if v_sev == 'High' else 0.002
-        elif 'TCG Norm' in v_type:
-            p = 0.001 
+        cursor.execute("SELECT address, type, details, severity FROM vulnerabilities")
+        vulns = cursor.fetchall()
+        
+        # Group by address for better per-target probability
+        addr_probs = {}
+        for addr, v_type, v_details, v_sev in vulns:
+            if addr not in addr_probs: addr_probs[addr] = 1.0 # Initial fail prob for this addr
             
-        # Bayesian recalibration: every failed attack reduces p_success
-        f_str = fail_atts.get(addr, "")
-        if f_str:
-            # Count distinct attack attempts recorded in fail_att
-            # fail_att usually looks like '[1.x][2.x]...'
-            import re
-            attacks = set(re.findall(r'\[(\d+)\.', f_str))
-            for _ in range(len(attacks)):
-                p *= 0.3 # Reduce probability by 70% per failed distinct attack type
+            p = 0.0001
+            if 'R-Reuse' in v_type:
+                p = 0.99 if 'Different Z' in str(v_details) else 0.01
+            elif 'Spectral' in v_type:
+                p = 0.1 if v_sev == 'High' else 0.02
+            elif 'Neural' in v_type:
+                p = 0.05 if v_sev == 'High' else 0.01
+            elif 'Small R' in v_type:
+                p = 0.02 if v_sev == 'High' else 0.005
+            elif 'LSB Bias' in v_type:
+                p = 0.01 if v_sev == 'High' else 0.002
+            elif 'TCG Norm' in v_type:
+                p = 0.001 
                 
-        addr_probs[addr] *= (1.0 - p)
-    
-    # Calculate fleet-wide success probability
-    # 1 - Product(1 - P_addr_success)
-    total_fail_prob = 1.0
-    for addr in addr_probs:
-        addr_success_p = 1.0 - addr_probs[addr]
-        total_fail_prob *= (1.0 - addr_success_p)
-    
-    stats['success_prob'] = (1.0 - total_fail_prob) * 100
+            # Bayesian recalibration: every failed attack reduces p_success
+            f_str = fail_atts.get(addr, "")
+            if f_str:
+                # Count distinct attack attempts recorded in fail_att
+                # fail_att usually looks like '[1.x][2.x]...'
+                import re
+                attacks = set(re.findall(r'\[(\d+)\.', f_str))
+                for _ in range(len(attacks)):
+                    p *= 0.3 # Reduce probability by 70% per failed distinct attack type
+                    
+            addr_probs[addr] *= (1.0 - p)
+        
+        # Calculate fleet-wide success probability
+        total_fail_prob = 1.0
+        for addr in addr_probs:
+            addr_success_p = 1.0 - addr_probs[addr]
+            total_fail_prob *= (1.0 - addr_success_p)
+        
+        stats['success_prob'] = (1.0 - total_fail_prob) * 100
+    except:
+        pass
     
     conn.close()
     return stats
@@ -534,6 +548,15 @@ def get_signatures(address):
     rows = cursor.fetchall()
     conn.close()
     return [{'r': int(r), 's': int(s), 'z': int(z), 'txid': txid} for r, s, z, txid in rows]
+
+def get_full_signatures(address):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT r_hex, s_hex, z_hex, pubkey_hex, txid FROM signatures WHERE address = ?", (address,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'r': r, 's': s, 'z': z, 'pubkey': pubkey, 'txid': txid} for r, s, z, pubkey, txid in rows]
+
 
 def add_recovered_key(address, privkey_hex, wif='', method='Lattice'):
     conn = get_connection()
