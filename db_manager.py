@@ -57,6 +57,9 @@ def init_db():
         analyzed BOOLEAN DEFAULT 0,
         nonces_checked BOOLEAN DEFAULT 0,
         neural_scanned BOOLEAN DEFAULT 0,
+        tcg_scanned BOOLEAN DEFAULT 0,
+        brainwallet_scanned BOOLEAN DEFAULT 0,
+        fail_att TEXT DEFAULT '',
         processing_by TEXT,
         processing_since DATETIME,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -130,6 +133,24 @@ def init_db():
     except sqlite3.OperationalError:
         pass # Column already exists
 
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN tcg_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN brainwallet_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN fail_att TEXT DEFAULT ''")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
     conn.close()
 
 def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
@@ -154,6 +175,26 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     elif stage == 'neural':
         # Neural scans: Target addresses with sigs that haven't been neural scanned
         stage_filter = "neural_scanned = 0 AND sigs_fetched = 1"
+    elif stage == 'tcg':
+        # TCG scans: Target addresses with sigs that haven't been TCG scanned
+        stage_filter = "tcg_scanned = 0 AND sigs_fetched = 1"
+    elif stage == 'brainwallet':
+        # Brainwallet scan: Any address not yet brainwallet-scanned
+        stage_filter = "brainwallet_scanned = 0"
+    elif stage == 'bruteforce':
+        # Brute-force scans: Only if ALL 7 other techniques have failed at least 3 times
+        # Format in DB is [ID.count],[ID.count]...
+        # We check for [1.N] where N >= 3, [2.N] where N >= 3, etc.
+        # This regex-like glob ensures we only pick up targets that have exhausted all other options.
+        stage_filter = (
+            "fail_att GLOB '*[[]1.[3-9][]]*' AND "
+            "fail_att GLOB '*[[]2.[3-9][]]*' AND "
+            "fail_att GLOB '*[[]3.[3-9][]]*' AND "
+            "fail_att GLOB '*[[]4.[3-9][]]*' AND "
+            "fail_att GLOB '*[[]5.[3-9][]]*' AND "
+            "fail_att GLOB '*[[]6.[3-9][]]*' AND "
+            "fail_att GLOB '*[[]7.[3-9][]]*'"
+        )
     
     # Exclude already compromised addresses
     stage_filter = f"({stage_filter}) AND IFNULL(status, '') != 'Compromised'"
@@ -193,6 +234,10 @@ def mark_stage_done(address, stage, worker_id):
         column = "analyzed"
     elif stage == 'neural':
         column = "neural_scanned"
+    elif stage == 'tcg':
+        column = "tcg_scanned"
+    elif stage == 'brainwallet':
+        column = "brainwallet_scanned"
 
     cursor.execute(f'''
     UPDATE addresses 
@@ -203,7 +248,7 @@ def mark_stage_done(address, stage, worker_id):
     conn.close()
 
 def release_address(address, worker_id, mark_done=False):
-    """Release a claimed address."""
+    """Release a specific address claimed by a worker."""
     conn = get_connection()
     cursor = conn.cursor()
     if mark_done:
@@ -221,6 +266,46 @@ def release_address(address, worker_id, mark_done=False):
     conn.commit()
     conn.close()
 
+def release_all_addresses(worker_id, mark_done=False):
+    """Release all addresses claimed by a worker."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if mark_done:
+        cursor.execute('''
+        UPDATE addresses 
+        SET processing_by = NULL, processing_since = NULL, analyzed = 1 
+        WHERE processing_by = ?
+        ''', (worker_id,))
+    else:
+        cursor.execute('''
+        UPDATE addresses 
+        SET processing_by = NULL, processing_since = NULL 
+        WHERE processing_by = ?
+        ''', (worker_id,))
+    conn.commit()
+    conn.close()
+
+def mark_all_done(worker_id, stage):
+    """Mark all addresses claimed by a worker for a specific stage as done."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    column = "analyzed"
+    if stage == 'fetching': column = "sigs_fetched"
+    elif stage == 'scanning': column = "sigs_scanned"
+    elif stage == 'analyzing': column = "analyzed"
+    elif stage == 'neural': column = "neural_scanned"
+    elif stage == 'tcg': column = "tcg_scanned"
+    elif stage == 'brainwallet': column = "brainwallet_scanned"
+    elif stage == 'bruteforce': column = "analyzed" # or we can add a new column
+
+    cursor.execute(f'''
+    UPDATE addresses 
+    SET {column} = 1, processing_by = NULL, processing_since = NULL, last_updated = CURRENT_TIMESTAMP
+    WHERE processing_by = ?
+    ''', (worker_id,))
+    conn.commit()
+    conn.close()
+
 def update_worker_status(worker_id, task, cpu=0.0, ram=0.0):
     conn = get_connection()
     cursor = conn.cursor()
@@ -231,6 +316,43 @@ def update_worker_status(worker_id, task, cpu=0.0, ram=0.0):
     task=excluded.task, cpu_usage=excluded.cpu_usage, ram_usage=excluded.ram_usage, last_heartbeat=CURRENT_TIMESTAMP
     ''', (worker_id, task, cpu, ram))
     conn.commit()
+    conn.close()
+
+def update_fail_att(address, attack_id):
+    """Update failure attempts for an attack on an address."""
+    update_fail_att_batch([address], attack_id)
+
+def update_fail_att_batch(addresses, attack_id):
+    """Update failure attempts for an attack on multiple addresses in batch."""
+    if not addresses: return
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Fetch existing fail_att values in one go
+    placeholders = ', '.join(['?'] * len(addresses))
+    cursor.execute(f"SELECT address, fail_att FROM addresses WHERE address IN ({placeholders})", addresses)
+    rows = cursor.fetchall()
+    
+    import re
+    update_data = []
+    for address, fail_att_str in rows:
+        fail_att_str = fail_att_str if fail_att_str else ""
+        matches = re.findall(r'\[(\d+)\.(\d+)\]', fail_att_str)
+        fail_map = {int(aid): int(att) for aid, att in matches}
+        
+        # Update current
+        fail_map[attack_id] = fail_map.get(attack_id, 0) + 1
+        
+        # Rebuild string
+        new_fail_att = ",".join([f"[{aid}.{att}]" for aid, att in sorted(fail_map.items())])
+        update_data.append((new_fail_att, address))
+    
+    # Batch update with executemany
+    if update_data:
+        cursor.execute("BEGIN TRANSACTION")
+        cursor.executemany("UPDATE addresses SET fail_att = ?, last_updated = CURRENT_TIMESTAMP WHERE address = ?", update_data)
+        conn.commit()
+    
     conn.close()
 
 def upsert_address(address_data):

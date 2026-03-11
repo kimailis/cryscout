@@ -26,14 +26,23 @@ class ScannerWorker(BaseWorker):
                 self.log(f"Running historical vulnerability scans on {addr}")
                 if run_historical_scans(addr):
                     self.log(f"!!! SUCCESS: Historical vulnerability found key for {addr}")
+                else:
+                    from db_manager import update_fail_att
+                    update_fail_att(addr, 1)
 
                 # 2. Check known weak nonces (fast)
                 if check_known_weak_nonces(addr):
                     self.log(f"!!! SUCCESS: Weak nonce found for {addr}")
+                else:
+                    from db_manager import update_fail_att
+                    update_fail_att(addr, 1)
                 
                 # 3. Check related nonces
                 if try_related_nonce(addr):
                     self.log(f"!!! SUCCESS: Related nonce found for {addr}")
+                else:
+                    from db_manager import update_fail_att
+                    update_fail_att(addr, 1)
                 
                 # 4. Weak key scan (sequential range)
                 # We'll just do a small check here as part of the worker

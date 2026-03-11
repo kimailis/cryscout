@@ -54,7 +54,9 @@ class StrikerWorker(BaseWorker):
                 self.log(f"$$$ SUCCESS! Private key recovered for {addr} via BKZ $$$")
                 release_address(addr, self.worker_id, mark_done=True)
                 return
-
+            else:
+                from db_manager import update_fail_att
+                update_fail_att(addr, 4)
             # 2. Pollard's Kangaroo (Bounded ECDLP search - for very small/biased ranges)
             self.heartbeat(f"STRIKING: {addr_short} (Kangaroo)")
             self.log(f"Phase 2: Running Pollard's Kangaroo bounded search on {addr}")
@@ -62,14 +64,18 @@ class StrikerWorker(BaseWorker):
                 self.log(f"$$$ SUCCESS! Private key recovered for {addr} via Kangaroo $$$")
                 release_address(addr, self.worker_id, mark_done=True)
                 return
-            
+            else:
+                from db_manager import update_fail_att
+                update_fail_att(addr, 4)            
             # 3. Enhanced Lattice (Standard) as a fallback
             self.heartbeat(f"STRIKING: {addr_short} (Lattice)")
             if run_lattice_attacks_enhanced(addr):
                 self.log(f"$$$ SUCCESS! Private key recovered for {addr} via Enhanced Lattice $$$")
                 release_address(addr, self.worker_id, mark_done=True)
                 return
-
+            else:
+                from db_manager import update_fail_att
+                update_fail_att(addr, 4)
             # If we reach here, intensive strike failed for now
             self.heartbeat(f"Strike failed: {addr_short}")
             self.log(f"Strike complete for {addr}. No key recovered yet.")
