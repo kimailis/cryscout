@@ -82,8 +82,24 @@ def init_db():
         z_int TEXT,
         r_bits INTEGER,
         is_biased BOOLEAN,
+        cluster_id INTEGER,
         found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(address, txid, vin, r_hex, s_hex)
+        UNIQUE(address, txid, vin, r_hex, s_hex),
+        FOREIGN KEY (cluster_id) REFERENCES clusters (cluster_id)
+    )
+    ''')
+    
+    # Clusters table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS clusters (
+        cluster_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fingerprint_hash TEXT UNIQUE,
+        library_name TEXT,
+        features_json TEXT,
+        vulnerability_score REAL DEFAULT 0,
+        total_addresses INTEGER DEFAULT 0,
+        total_signatures INTEGER DEFAULT 0,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     ''')
     
@@ -92,12 +108,14 @@ def init_db():
     CREATE TABLE IF NOT EXISTS vulnerabilities (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         address TEXT,
+        cluster_id INTEGER,
         type TEXT,
         txid TEXT,
         details TEXT,
         severity TEXT,
         found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (address) REFERENCES addresses (address)
+        FOREIGN KEY (address) REFERENCES addresses (address),
+        FOREIGN KEY (cluster_id) REFERENCES clusters (cluster_id)
     )
     ''')
     
@@ -146,6 +164,24 @@ def init_db():
         pass # Column already exists
 
     try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN cluster_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE signatures ADD COLUMN cluster_id INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE vulnerabilities ADD COLUMN cluster_id INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    try:
         cursor.execute("ALTER TABLE addresses ADD COLUMN fail_att TEXT DEFAULT ''")
         conn.commit()
     except sqlite3.OperationalError:
@@ -158,6 +194,38 @@ def init_db():
         pass # Column already exists
 
     conn.close()
+
+def create_cluster(fingerprint_hash, library_name=None, features=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO clusters (fingerprint_hash, library_name, features_json)
+    VALUES (?, ?, ?)
+    ON CONFLICT(fingerprint_hash) DO UPDATE SET
+    library_name=COALESCE(excluded.library_name, clusters.library_name),
+    features_json=COALESCE(excluded.features_json, clusters.features_json),
+    last_updated=CURRENT_TIMESTAMP
+    ''', (fingerprint_hash, library_name, json.dumps(features) if features else None))
+    conn.commit()
+    cursor.execute("SELECT cluster_id FROM clusters WHERE fingerprint_hash = ?", (fingerprint_hash,))
+    cluster_id = cursor.fetchone()[0]
+    conn.close()
+    return cluster_id
+
+def assign_sig_to_cluster(sig_id, cluster_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE signatures SET cluster_id = ? WHERE id = ?", (cluster_id, sig_id))
+    conn.commit()
+    conn.close()
+
+def get_cluster_signatures(cluster_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT r_int, s_int, z_int, txid, address FROM signatures WHERE cluster_id = ?", (cluster_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'r': int(r), 's': int(s), 'z': int(z), 'txid': txid, 'address': addr} for r, s, z, txid, addr in rows]
 
 def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     """Claim the most vulnerable addresses for a worker."""
@@ -230,6 +298,30 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     addresses = [row[0] for row in cursor.fetchall()]
     conn.close()
     return addresses
+
+def mark_stages_done(address, stages, worker_id):
+    """Mark multiple stages as done for an address."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    updates = ["processing_by = NULL", "processing_since = NULL", "last_updated = CURRENT_TIMESTAMP"]
+    for stage in stages:
+        column = "analyzed"
+        if stage == 'fetching': column = "sigs_fetched"
+        elif stage == 'scanning': column = "sigs_scanned"
+        elif stage == 'analyzing': column = "analyzed"
+        elif stage == 'neural': column = "neural_scanned"
+        elif stage == 'tcg': column = "tcg_scanned"
+        elif stage == 'vortex': column = "vortex_scanned"
+        elif stage == 'brainwallet': column = "brainwallet_scanned"
+        updates.append(f"{column} = 1")
+
+    cursor.execute(f'''
+    UPDATE addresses 
+    SET {", ".join(updates)}
+    WHERE address = ? AND processing_by = ?
+    ''', (address, worker_id))
+    conn.commit()
+    conn.close()
 
 def mark_stage_done(address, stage, worker_id):
     """Mark a specific stage as done for an address."""

