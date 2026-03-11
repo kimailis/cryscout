@@ -110,6 +110,25 @@ def scan_android_rng(target_set):
     # Check 1 to 2^32 sequentially or via sampling
     return scan_small_keys(target_set, max_key=2**20) # For now, keep it small
 
+def scan_vortex_harmonic_bruteforce(target_set, max_jumps=10000):
+    print("Running Vortex Harmonic Pruning Brute Force...")
+    hash160_targets = build_target_info(target_set)
+    found = []
+    # Vortex algorithm uses 2^n mod 9 sequence jumps (1, 2, 4, 8, 7, 5) avoiding 3,6,9
+    vortex_cycle = [1, 2, 4, 8, 7, 5]
+    for i in range(max_jumps):
+        cycle_val = vortex_cycle[i % 6]
+        # Jump through keyspace using topological shifts
+        pk_int = (1 << (i % 256)) * cycle_val + (i * 9)
+        if pk_int >= P or pk_int <= 0:
+            pk_int = (pk_int % (P-1)) + 1
+        
+        res = check_privkey(pk_int, hash160_targets)
+        if res:
+            found.append((res[0], res[1], 'Vortex Harmonic Pruning'))
+            
+    return found
+
 def run_weak_key_scan(small_key_max=2**20):
     conn = get_connection()
     c = conn.cursor()

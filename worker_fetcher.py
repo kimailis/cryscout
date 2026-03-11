@@ -33,11 +33,23 @@ class AsyncFetcherWorker(BaseWorker):
                     if sigs:
                         await loop.run_in_executor(None, save_signatures, addr, sigs)
                         self.log(f"  Got {len(sigs)} sigs for {addr}")
-                    
-                    await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
+                        await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
+                    else:
+                        self.log(f"  Transactions exist but no signatures extracted for {addr}")
+                        # Mark as fetched AND analyzed since signature analysis is impossible
+                        await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
+                        await loop.run_in_executor(None, mark_stage_done, addr, 'analyzing', self.worker_id)
+                        await loop.run_in_executor(None, mark_stage_done, addr, 'scanning', self.worker_id)
+                        await loop.run_in_executor(None, mark_stage_done, addr, 'neural', self.worker_id)
+                        await loop.run_in_executor(None, mark_stage_done, addr, 'tcg', self.worker_id)
                 else:
                     self.log(f"  No spending transactions for {addr}")
+                    # Fast-track to analyzed since there is nothing for signature workers to do
                     await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
+                    await loop.run_in_executor(None, mark_stage_done, addr, 'analyzing', self.worker_id)
+                    await loop.run_in_executor(None, mark_stage_done, addr, 'scanning', self.worker_id)
+                    await loop.run_in_executor(None, mark_stage_done, addr, 'neural', self.worker_id)
+                    await loop.run_in_executor(None, mark_stage_done, addr, 'tcg', self.worker_id)
                     
             except Exception as e:
                 self.log(f"Error fetching {addr}: {e}")
