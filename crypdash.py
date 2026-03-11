@@ -195,7 +195,7 @@ def draw_dashboard(stdscr):
             # SUCCESS PROBABILITY
             prob = stats['SuccessProb']
             prob_color = curses.color_pair(1) if prob > 50 else (curses.color_pair(3) if prob > 10 else curses.color_pair(2))
-            stdscr.addstr(3, 40, "Estimated Success Chance: ")
+            stdscr.addstr(4, 2, "Estimated Success Chance: ")
             stdscr.addstr(f"{prob:.4f}%", prob_color | curses.A_BOLD)
             
             stdscr.addstr(5, 2, "Progress Overview:", curses.A_UNDERLINE)
