@@ -13,7 +13,7 @@ from datetime import datetime
 # CONFIGURATION
 STATUS_FILE = 'service_status.json'
 SIGNAL_FILE = 'service_signal.txt'
-WORKER_TYPES = ["fetcher", "scanner", "analyzer", "neural", "tcg", "striker", "forensic", "bruteforce", "vortex"]
+WORKER_TYPES = ["fetcher", "scanner", "analyzer", "neural", "tcg", "striker", "forensic", "bruteforce", "vortex", "cluster"]
 MAX_CPU_PERCENT = 85.0
 MAX_RAM_PERCENT = 85.0
 
@@ -194,12 +194,21 @@ class AsyncCryScoutHub:
 
     async def run(self):
         self.log("Async CryScout Hub Online.")
+        await self.update_dashboard_json()
+        
         # Start initial workers
         for w_type in WORKER_TYPES:
-            await self.start_worker(w_type)
+            try:
+                self.log(f"Attempting to start worker: {w_type}")
+                await self.start_worker(w_type)
+                self.log(f"Successfully started worker: {w_type}")
+            except Exception as e:
+                self.log(f"Error starting {w_type}: {e}")
         
         # Give a moment to initialize and write first status
+        self.log("All initial workers requested. Waiting for initialization...")
         await asyncio.sleep(2)
+        await self.update_dashboard_json()
         
         while self.running:
             try:
@@ -221,8 +230,8 @@ class AsyncCryScoutHub:
                         await self.start_worker(w_type)
                 
                 await self.update_dashboard_json()
-                # Yield to other tasks
-                await asyncio.sleep(5)
+                # Yield to other tasks - increased sleep for stability under load
+                await asyncio.sleep(15)
                 
             except Exception as e:
                 self.log(f"Hub Main Loop Error: {e}")

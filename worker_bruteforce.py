@@ -11,12 +11,12 @@ class BruteForceWorker(BaseWorker):
     def process_loop(self):
         # 1. Try to claim targets from brainwallet stage first
         stage = 'brainwallet'
-        addresses = claim_address(self.worker_id, stage=stage, limit=1000)
+        addresses = claim_address(self.worker_id, stage=stage, limit=100)
         
         # 2. If no brainwallet targets, try the final bruteforce stage
         if not addresses:
             stage = 'bruteforce'
-            addresses = claim_address(self.worker_id, stage=stage, limit=1000)
+            addresses = claim_address(self.worker_id, stage=stage, limit=100)
         
         if not addresses:
             self.heartbeat("Idle (No addresses ready for brute force)")

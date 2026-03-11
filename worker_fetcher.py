@@ -4,7 +4,7 @@ import asyncio
 import random
 import time
 from base_worker import BaseWorker
-from db_manager import claim_address, release_address, get_connection, mark_stage_done, save_signatures
+from db_manager import claim_address, release_address, get_connection, mark_stage_done, save_signatures, mark_stages_done
 from tx_preimage_reconstructor import async_extract_sigs_from_txids, extract_sigs_with_real_z
 
 class AsyncFetcherWorker(BaseWorker):
@@ -36,20 +36,12 @@ class AsyncFetcherWorker(BaseWorker):
                         await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
                     else:
                         self.log(f"  Transactions exist but no signatures extracted for {addr}")
-                        # Mark as fetched AND analyzed since signature analysis is impossible
-                        await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
-                        await loop.run_in_executor(None, mark_stage_done, addr, 'analyzing', self.worker_id)
-                        await loop.run_in_executor(None, mark_stage_done, addr, 'scanning', self.worker_id)
-                        await loop.run_in_executor(None, mark_stage_done, addr, 'neural', self.worker_id)
-                        await loop.run_in_executor(None, mark_stage_done, addr, 'tcg', self.worker_id)
+                        # Mark all stages as done since no signatures exist
+                        await loop.run_in_executor(None, mark_stages_done, addr, ['fetching', 'analyzing', 'scanning', 'neural', 'tcg'], self.worker_id)
                 else:
                     self.log(f"  No spending transactions for {addr}")
                     # Fast-track to analyzed since there is nothing for signature workers to do
-                    await loop.run_in_executor(None, mark_stage_done, addr, 'fetching', self.worker_id)
-                    await loop.run_in_executor(None, mark_stage_done, addr, 'analyzing', self.worker_id)
-                    await loop.run_in_executor(None, mark_stage_done, addr, 'scanning', self.worker_id)
-                    await loop.run_in_executor(None, mark_stage_done, addr, 'neural', self.worker_id)
-                    await loop.run_in_executor(None, mark_stage_done, addr, 'tcg', self.worker_id)
+                    await loop.run_in_executor(None, mark_stages_done, addr, ['fetching', 'analyzing', 'scanning', 'neural', 'tcg'], self.worker_id)
                     
             except Exception as e:
                 self.log(f"Error fetching {addr}: {e}")
