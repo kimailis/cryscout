@@ -430,26 +430,38 @@ def get_stats():
     # Small R (<128 bits): 0.005
     # LSB Bias (>8 bits): 0.001
     
-    cursor.execute("SELECT type, details, severity FROM vulnerabilities")
+    cursor.execute("SELECT address, type, details, severity FROM vulnerabilities")
     vulns = cursor.fetchall()
     
-    fail_prob = 1.0
-    for v_type, v_details, v_sev in vulns:
-        p = 0.0001 # Default baseline for any finding
+    # Group by address for better per-target probability
+    addr_probs = {}
+    for addr, v_type, v_details, v_sev in vulns:
+        if addr not in addr_probs: addr_probs[addr] = 1.0 # Fail prob for this addr
+        
+        p = 0.0001
         if 'R-Reuse' in v_type:
             p = 0.99 if 'Different Z' in str(v_details) else 0.01
         elif 'Spectral' in v_type:
-            p = 0.05 if v_sev == 'High' else 0.01
+            p = 0.1 if v_sev == 'High' else 0.02
         elif 'Neural' in v_type:
-            p = 0.02 if v_sev == 'High' else 0.005
+            p = 0.05 if v_sev == 'High' else 0.01
         elif 'Small R' in v_type:
-            p = 0.01 if v_sev == 'High' else 0.002
+            p = 0.02 if v_sev == 'High' else 0.005
         elif 'LSB Bias' in v_type:
-            p = 0.005 if v_sev == 'High' else 0.001
+            p = 0.01 if v_sev == 'High' else 0.002
+        elif 'TCG Norm' in v_type:
+            p = 0.001 # Small bias but valid collision
             
-        fail_prob *= (1.0 - p)
+        addr_probs[addr] *= (1.0 - p)
     
-    stats['success_prob'] = (1.0 - fail_prob) * 100 # In percentage
+    # Calculate fleet-wide success probability
+    # 1 - Product(1 - P_addr_success)
+    total_fail_prob = 1.0
+    for addr in addr_probs:
+        addr_success_p = 1.0 - addr_probs[addr]
+        total_fail_prob *= (1.0 - addr_success_p)
+    
+    stats['success_prob'] = (1.0 - total_fail_prob) * 100
     
     conn.close()
     return stats
