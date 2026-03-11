@@ -412,6 +412,44 @@ def get_stats():
     
     cursor.execute("SELECT COUNT(*) FROM recovered_keys")
     stats['keys_recovered'] = cursor.fetchone()[0]
+
+    # New detailed stats
+    cursor.execute("SELECT COUNT(*) FROM addresses WHERE neural_scanned = 1")
+    stats['neural_scanned'] = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM addresses WHERE fail_att != ''")
+    stats['attacked'] = cursor.fetchone()[0]
+    
+    # Calculate estimated probability of success
+    # 1 - Product(1 - p_i)
+    # p_i thresholds:
+    # R-Reuse (not same Z): 0.99
+    # R-Reuse (same Z): 0.01 (might hit if we find another sig)
+    # Spectral Bias (High): 0.05
+    # Neural Anomaly (High): 0.02
+    # Small R (<128 bits): 0.005
+    # LSB Bias (>8 bits): 0.001
+    
+    cursor.execute("SELECT type, details, severity FROM vulnerabilities")
+    vulns = cursor.fetchall()
+    
+    fail_prob = 1.0
+    for v_type, v_details, v_sev in vulns:
+        p = 0.0001 # Default baseline for any finding
+        if 'R-Reuse' in v_type:
+            p = 0.99 if 'Different Z' in str(v_details) else 0.01
+        elif 'Spectral' in v_type:
+            p = 0.05 if v_sev == 'High' else 0.01
+        elif 'Neural' in v_type:
+            p = 0.02 if v_sev == 'High' else 0.005
+        elif 'Small R' in v_type:
+            p = 0.01 if v_sev == 'High' else 0.002
+        elif 'LSB Bias' in v_type:
+            p = 0.005 if v_sev == 'High' else 0.001
+            
+        fail_prob *= (1.0 - p)
+    
+    stats['success_prob'] = (1.0 - fail_prob) * 100 # In percentage
     
     conn.close()
     return stats
