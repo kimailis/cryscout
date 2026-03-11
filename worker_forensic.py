@@ -26,14 +26,18 @@ class ForensicWorker(BaseWorker):
             self.log(f"Running forensic analysis on {addr}...")
             
             try:
+                from db_manager import update_fail_att
                 # 1. Check for Low Entropy Patterns
-                self.scanner.scan_low_entropy_patterns()
+                if not self.scanner.scan_low_entropy_patterns():
+                    update_fail_att(addr, 3)
                 
                 # 2. Check for Debian PID Vulnerability
-                self.scanner.scan_debian_pids()
+                if not self.scanner.scan_debian_pids():
+                    update_fail_att(addr, 3)
                 
                 # 3. Check for Milk Sad (Mersenne Twister)
-                self.scanner.scan_milk_sad()
+                if not self.scanner.scan_milk_sad():
+                    update_fail_att(addr, 3)
                 
                 # 3. Targeted Randstorm (requires first_seen)
                 conn = get_connection()
@@ -43,7 +47,10 @@ class ForensicWorker(BaseWorker):
                 conn.close()
                 
                 if row and row[0]:
-                    self.scanner.scan_randstorm(addr, row[0])
+                    if not self.scanner.scan_randstorm(addr, row[0]):
+                        update_fail_att(addr, 3)
+                else:
+                    update_fail_att(addr, 3)
 
                 # Mark forensic stage as done for this address
                 # We can reuse mark_analyzed or a custom flag if we add it

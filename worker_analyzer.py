@@ -10,7 +10,7 @@ from deep_scan import run_algebraic_attacks
 class AnalyzerWorker(BaseWorker):
     def process_loop(self):
         # Analyzer needs addresses that HAVE signatures and haven't been analyzed
-        extra_filter = "address IN (SELECT address FROM signatures GROUP BY address HAVING COUNT(*) >= 2)"
+        extra_filter = "address IN (SELECT address FROM signatures GROUP BY address HAVING COUNT(*) >= 1)"
         addresses = claim_address(self.worker_id, stage='analyzing', limit=1, extra_filter=extra_filter)
         
         if not addresses:
@@ -28,17 +28,23 @@ class AnalyzerWorker(BaseWorker):
             if check_r_reuse_strict(addr):
                 self.log(f"!!! SUCCESS: R-reuse found for {addr}")
                 found = True
-            
+            else:
+                from db_manager import update_fail_att
+                update_fail_att(addr, 2)            
             # Lattice attack
             if not found and run_lattice_attacks_enhanced(addr):
                 self.log(f"!!! SUCCESS: Lattice key found for {addr}")
                 found = True
-            
+            elif not found:
+                from db_manager import update_fail_att
+                update_fail_att(addr, 2)            
             # Algebraic attacks
             if not found and run_algebraic_attacks(addr):
                 self.log(f"!!! SUCCESS: Algebraic key found for {addr}")
                 found = True
-            
+            elif not found:
+                from db_manager import update_fail_att
+                update_fail_att(addr, 2)            
             # Done with this address
             mark_stage_done(addr, 'analyzing', self.worker_id)
             self.log(f"Finished analysis for {addr}")

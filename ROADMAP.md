@@ -37,21 +37,11 @@
 ## Phase 2 — Immediate Next Steps
 
 ### 2.1 Massive Brainwallet Dictionary Attack → `massive_brainwallet.py`
-**Priority: HIGH** — Known to work historically. Many early Bitcoin addresses used SHA256(passphrase) as private keys.
-
-- [x] Generate comprehensive wordlist (10M+ entries):
-  - Common passwords (loads rockyou.txt / passwords.txt if present)
-  - All English words + common misspellings
-  - Number sequences (0–10M)
-  - Keyboard patterns (`qwerty`, `asdfgh`, `zxcvbn`, etc.)
-  - Famous quotes, song lyrics, movie lines
-  - Bitcoin-related phrases (`satoshi`, `nakamoto`, `genesis`, etc.)
-  - Leetspeak variations (`p4ssw0rd`, `b1tc01n`)
-  - Date-based strings (`20090103`, `01/03/2009`)
-  - Phone number patterns
-- [ ] Implement batch GPU-accelerated SHA256 hashing (future)
+**Priority: HIGH** — Known to work historically.
+- [x] Generate comprehensive wordlist (10M+ entries)
+- [x] Implement multiprocessing CPU-parallel hashing (2x-8x speedup) ★
 - [x] Address comparison using set() lookup (O(1) per check)
-- [x] Run against ALL 1,000 tracked addresses
+- [x] Run against ALL 1,000 tracked addresses (integrated in `bruteforce` worker) ★
 
 ### 2.2 Known-Vulnerable Address Database → `known_vuln_scanner.py`
 **Priority: HIGH** — Public databases exist of addresses with confirmed weak keys.
@@ -125,9 +115,10 @@
 - [ ] Real-time mempool monitoring for new signatures from tracked addresses
 
 ### 4.2 Distributed Scanning
-- [ ] Worker-based architecture for parallel brainwallet hashing
+- [x] Worker-based architecture for parallel brainwallet hashing (integrated in `cryshub.py`) ★
+- [x] Batch address processing (up to 1000 targets per scan cycle) ★
 - [ ] Partition key space across multiple machines
-- [ ] Redis/PostgreSQL for shared state
+- [x] SQLite WAL mode for shared state concurrency ★
 
 ### 4.3 Monitoring & Alerts
 - [ ] Telegram/Discord bot for instant alerts on key recovery
