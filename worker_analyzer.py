@@ -10,7 +10,7 @@ from deep_scan import run_algebraic_attacks
 class AnalyzerWorker(BaseWorker):
     def process_loop(self):
         # Analyzer needs addresses that HAVE signatures and haven't been analyzed
-        extra_filter = "address IN (SELECT address FROM signatures GROUP BY address HAVING COUNT(*) >= 1)"
+        extra_filter = "a.address IN (SELECT address FROM signatures GROUP BY address HAVING COUNT(*) >= 1)"
         addresses = claim_address(self.worker_id, stage='analyzing', limit=1, extra_filter=extra_filter)
         
         if not addresses:
