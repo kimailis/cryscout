@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 import numpy as np
-from db_manager import get_connection, create_cluster, assign_sig_to_cluster
+from db_manager import get_connection, create_cluster, mark_signatures_cluster
 from library_fingerprinter import (
     extract_signature_features, cluster_signatures, 
     identify_library, get_fingerprint_hash
@@ -13,12 +13,12 @@ def run_clustering():
     cursor = conn.cursor()
     
     print("Fetching all signatures for clustering...")
-    cursor.execute("SELECT id, r_int, s_int, address FROM signatures")
+    cursor.execute("SELECT id, r_int, s_int, address FROM signatures WHERE r_int IS NOT NULL AND s_int IS NOT NULL")
     rows = cursor.fetchall()
+    conn.close() # Close quickly after fetch
     
     if not rows:
         print("No signatures found in database.")
-        conn.close()
         return
 
     sig_ids = [row[0] for row in rows]
@@ -39,6 +39,7 @@ def run_clustering():
     
     print(f"Found {len(clusters) - (1 if -1 in clusters else 0)} clusters (+ {len(clusters.get(-1, []))} noise signatures)")
     
+    # We will batch updates for better performance and fewer locks
     for label, indices in clusters.items():
         if label == -1: # Noise
             continue
@@ -49,16 +50,16 @@ def run_clustering():
         
         # Identify probable library
         lib_features = {
-            'r_bits_mean': cluster_feats[0],
-            'vortex_purity': cluster_feats[1],
-            'norm_log_mean': cluster_feats[2]
+            'r_bits_mean': float(cluster_feats[0]),
+            'vortex_purity': float(cluster_feats[1]),
+            'norm_log_mean': float(cluster_feats[2])
         }
         lib_name = identify_library(lib_features)
         
         # Unique addresses in this cluster
         unique_addrs = set(signatures[i]['address'] for i in indices)
         
-        # Create or update cluster in DB
+        # Create or update cluster in DB (this function has its own conn handling)
         cluster_id = create_cluster(
             fingerprint_hash=fingerprint,
             library_name=lib_name,
@@ -66,20 +67,24 @@ def run_clustering():
         )
         
         # Update DB for this cluster's stats
-        cursor.execute('''
-            UPDATE clusters SET 
-            total_signatures = ?, 
-            total_addresses = ?,
-            features_json = ?
-            WHERE cluster_id = ?
-        ''', (len(indices), len(unique_addrs), json.dumps(lib_features), cluster_id))
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                UPDATE clusters SET 
+                total_signatures = ?, 
+                total_addresses = ?,
+                features_json = ?
+                WHERE cluster_id = ?
+            ''', (len(indices), len(unique_addrs), json.dumps(lib_features), cluster_id))
+            conn.commit()
+        finally:
+            conn.close()
         
-        # Assign signatures to cluster
-        for i in indices:
-            assign_sig_to_cluster(sig_ids[i], cluster_id)
+        # Assign signatures to cluster in a batch
+        target_sig_ids = [sig_ids[i] for i in indices]
+        mark_signatures_cluster(target_sig_ids, cluster_id)
             
-    conn.commit()
-    conn.close()
     print("Clustering complete.")
 
 if __name__ == "__main__":

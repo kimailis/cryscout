@@ -16,19 +16,28 @@ import random
 import time
 import threading
 import ecdsa
-from ecdsa import SECP256k1, numbertheory
+from ecdsa import SECP256k1 as SECP256k1_pure, numbertheory
+try:
+    from fastecdsa.curve import secp256k1 as SECP256k1_fast
+    from fastecdsa.point import Point
+    FASE_AVAILABLE = True
+except ImportError:
+    FASE_AVAILABLE = False
 from db_manager import get_connection, add_recovered_key
 
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-G = SECP256k1.generator
-N = SECP256k1.order
-
+if FASE_AVAILABLE:
+    G = SECP256k1_fast.G
+    N = SECP256k1_fast.q
+else:
+    G = SECP256k1_pure.generator
+    N = SECP256k1_pure.order
 
 def point_to_int(point):
     """Convert an EC point to a deterministic integer for hashing."""
-    x = int(point.x())
-    return x
-
+    if FASE_AVAILABLE:
+        return point.x
+    return int(point.x())
 
 def hash_point(point, num_jumps):
     """Map a point to a jump index in [0, num_jumps)."""
@@ -54,7 +63,7 @@ def kangaroo_search(target_pubkey, lower, upper, max_time=300):
     Expected runtime: O(sqrt(upper - lower))
     
     Args:
-        target_pubkey: ecdsa.PointJacobi — the target public key
+        target_pubkey: ecdsa.PointJacobi or fastecdsa.Point
         lower: int — lower bound of search range
         upper: int — upper bound of search range
         max_time: int — maximum seconds to search
@@ -147,8 +156,12 @@ def kangaroo_search(target_pubkey, lower, upper, max_time=300):
 def verify_key_point(d, target_pubkey):
     """Verify that d*G == target_pubkey."""
     try:
-        computed = int(d) * G
-        return computed == target_pubkey
+        if FASE_AVAILABLE:
+            computed = int(d) * G
+            return computed.x == target_pubkey.x and computed.y == target_pubkey.y
+        else:
+            computed = int(d) * G
+            return computed == target_pubkey
     except:
         return False
 
@@ -244,13 +257,19 @@ def get_pubkey_for_address(address):
             pub_hex = row[0]
             # Handle both compressed (33 bytes) and uncompressed (65 bytes)
             pub_bytes = bytes.fromhex(pub_hex)
-            if pub_hex.startswith('04'):
-                # Uncompressed
-                vk = ecdsa.VerifyingKey.from_string(pub_bytes[1:], curve=SECP256k1)
+            
+            if FASE_AVAILABLE:
+                from fastecdsa.encoding.sec1 import SEC1Encoder
+                point = SEC1Encoder.decode_public_key(pub_bytes, SECP256k1_fast)
+                return point
             else:
-                # Compressed
-                vk = ecdsa.VerifyingKey.from_string(pub_bytes, curve=SECP256k1)
-            return vk.pubkey.point
+                if pub_hex.startswith('04'):
+                    # Uncompressed
+                    vk = ecdsa.VerifyingKey.from_string(pub_bytes[1:], curve=SECP256k1_pure)
+                else:
+                    # Compressed
+                    vk = ecdsa.VerifyingKey.from_string(pub_bytes, curve=SECP256k1_pure)
+                return vk.pubkey.point
         except Exception as e:
             # print(f"    Error parsing pubkey {row[0]}: {e}")
             pass
@@ -336,5 +355,5 @@ def run_kangaroo_scan(max_addresses=10, target_address=None):
 
 if __name__ == "__main__":
     import sys
-    max_addr = int(sys.argv[1]) if len(sys.argv) > 1 else 10
+    max_addr = int(sys.argv[1]) if len(sys.argv) > 2 else 10
     run_kangaroo_scan(max_addresses=max_addr)

@@ -12,7 +12,7 @@ from db_manager import get_connection
 # CONFIGURATION
 STATUS_FILE = 'service_status.json'
 SIGNAL_FILE = 'service_signal.txt'
-MAX_CPU_PERCENT = 95.0
+MAX_CPU_PERCENT = 70.0
 MAX_RAM_PERCENT = 95.0
 
 # Global log buffer

@@ -6,6 +6,11 @@ import sys
 import psutil
 import threading
 import signal
+try:
+    import torch
+    torch.set_num_threads(1)
+except ImportError:
+    pass
 from datetime import datetime
 from db_manager import update_worker_status, claim_address, release_address
 
@@ -18,6 +23,12 @@ class BaseWorker:
         self.current_task = task_name
         self.heartbeat_thread = None
         
+        # Lower process priority to be a good citizen
+        try:
+            os.nice(15)
+        except:
+            pass
+            
         # Setup signal handlers
         signal.signal(signal.SIGTERM, self._handle_exit)
         signal.signal(signal.SIGINT, self._handle_exit)
@@ -39,16 +50,14 @@ class BaseWorker:
 
     def throttle(self):
         """Dynamic sleep based on system CPU usage to avoid being killed."""
-        # Note: calling psutil.cpu_percent here might interfere with the heartbeat thread's call
-        # but for simplicity we'll keep it.
         cpu = psutil.cpu_percent()
-        if cpu > 95:
+        if cpu > 70:
             delay = 10.0
-        elif cpu > 90:
+        elif cpu > 65:
             delay = 5.0
-        elif cpu > 85:
+        elif cpu > 60:
             delay = 2.0
-        elif cpu > 75:
+        elif cpu > 50:
             delay = 1.0
         else:
             delay = 0.1

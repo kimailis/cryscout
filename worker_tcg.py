@@ -12,11 +12,16 @@ class TCGWorker(BaseWorker):
         
     def process_loop(self):
         # 1. Try to claim fresh targets for TCG stage first
-        addresses = claim_address(self.worker_id, stage='tcg', limit=20)
+        addresses = claim_address(self.worker_id, stage='tcg', limit=5)
         is_evolutionary_run = False
         
         if not addresses:
-            # 2. Evolutionary Mode: If caught up, pick random addresses to re-evaluate with mutated norms
+            # ONLY run evolutionary mode with a low probability to save CPU
+            if random.random() > 0.1:
+                self.heartbeat("Idle (Conserving CPU)")
+                time.sleep(60)
+                return
+
             self.evolution_cycle += 1
             self.heartbeat(f"Evolving: Cycle {self.evolution_cycle}")
             conn = get_connection()

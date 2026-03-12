@@ -8,13 +8,18 @@ import signal
 import psutil
 import sys
 import json
+try:
+    import torch
+    torch.set_num_threads(1)
+except ImportError:
+    pass
 from datetime import datetime
 
 # CONFIGURATION
 STATUS_FILE = 'service_status.json'
 SIGNAL_FILE = 'service_signal.txt'
-WORKER_TYPES = ["fetcher", "scanner", "analyzer", "neural", "tcg", "striker", "forensic", "bruteforce", "vortex", "cluster"]
-MAX_CPU_PERCENT = 85.0
+WORKER_TYPES = ["fetcher", "scanner", "analyzer", "neural", "striker", "forensic", "bruteforce", "cluster"]
+MAX_CPU_PERCENT = 70.0
 MAX_RAM_PERCENT = 85.0
 
 class AsyncCryScoutHub:
@@ -120,13 +125,12 @@ class AsyncCryScoutHub:
                 self.log(f"Worker {info['type']} (PID: {pid}) exited with code {p.returncode}")
                 to_remove.append(pid)
         for pid in to_remove:
-            del self.workers[pid]
+            if pid in self.workers:
+                del self.workers[pid]
 
     async def stop_all(self):
         self.log("Stopping all workers...")
         self.running = False
-        # Update JSON immediately to reflect stopping status
-        await self.update_dashboard_json()
         
         for pid, info in list(self.workers.items()):
             try:
@@ -143,10 +147,10 @@ class AsyncCryScoutHub:
             except: pass
         
         self.workers = {}
-        # Final JSON update
-        await self.update_dashboard_json()
+        # Status update happens at the very end of run()
 
-    async def check_stop_signal(self):
+    async def handle_signals(self):
+        """Check for external signals (STOP, START)."""
         if os.path.exists(SIGNAL_FILE):
             try:
                 with open(SIGNAL_FILE, 'r') as f:
@@ -155,9 +159,46 @@ class AsyncCryScoutHub:
                     self.log("Stop signal received. Shutting down.")
                     os.remove(SIGNAL_FILE)
                     await self.stop_all()
-                    return True
+                    return 'STOP'
+                elif sig == 'START':
+                    self.log("Start/Refresh signal received. Checking all workers.")
+                    os.remove(SIGNAL_FILE)
+                    # Trigger worker maintenance immediately
+                    await self.perform_worker_maintenance()
+                    return 'START'
             except: pass
-        return False
+        return None
+
+    async def perform_worker_maintenance(self):
+        """Check all workers and restart any that are missing or PAUSE if CPU high."""
+        await self.check_workers()
+        
+        cpu = psutil.cpu_percent()
+        # Even if CPU is high, ensure the 'analyzer' and 'fetcher' are running if missing
+        # because they are critical for progress.
+        
+        current_counts = { w: 0 for w in WORKER_TYPES }
+        for pid, info in self.workers.items():
+            if info["type"] in current_counts:
+                current_counts[info["type"]] += 1
+        
+        if cpu > MAX_CPU_PERCENT:
+            # Only start CRITICAL workers if missing when CPU is high
+            for w_type in ["analyzer", "fetcher"]:
+                if current_counts[w_type] < 1 and self.running:
+                    self.log(f"CPU HIGH but restarting CRITICAL worker: {w_type}")
+                    await self.start_worker(w_type)
+            
+            self.log(f"CPU HIGH ({cpu}%). PAUSING NON-CRITICAL WORKER MAINTENANCE.")
+            await self.update_dashboard_json()
+            return
+            
+        for w_type in WORKER_TYPES:
+            if current_counts[w_type] < 1 and self.running:
+                self.log(f"Restarting missing worker: {w_type}")
+                await self.start_worker(w_type)
+        
+        await self.update_dashboard_json()
 
     async def check_completion_cycle(self):
         """Monitor for Phase 1 completion and trigger Deep Scan (Phase 2)."""
@@ -201,45 +242,45 @@ class AsyncCryScoutHub:
             try:
                 self.log(f"Attempting to start worker: {w_type}")
                 await self.start_worker(w_type)
-                self.log(f"Successfully started worker: {w_type}")
             except Exception as e:
                 self.log(f"Error starting {w_type}: {e}")
         
-        # Give a moment to initialize and write first status
-        self.log("All initial workers requested. Waiting for initialization...")
+        # Give a moment to initialize
         await asyncio.sleep(2)
         await self.update_dashboard_json()
         
+        maintenance_counter = 0
         while self.running:
             try:
-                if await self.check_stop_signal(): break
-                await self.check_workers()
+                # Signal check (every 1s)
+                sig = await self.handle_signals()
+                if sig == 'STOP': break
+                
+                # Full maintenance check every 15s (or when START signal hits)
+                maintenance_counter += 1
+                if maintenance_counter >= 15:
+                    await self.perform_worker_maintenance()
+                    maintenance_counter = 0
                 
                 # Check for cycle completion
                 await self.check_completion_cycle()
                 
-                # Maintenance
-                current_counts = { w: 0 for w in WORKER_TYPES }
-                for pid, info in self.workers.items():
-                    if info["type"] in current_counts:
-                        current_counts[info["type"]] += 1
-                
-                for w_type in WORKER_TYPES:
-                    if current_counts[w_type] < 1 and self.running:
-                        self.log(f"Restarting missing worker: {w_type}")
-                        await self.start_worker(w_type)
-                
+                # Update dashboard every cycle anyway
                 await self.update_dashboard_json()
-                # Yield to other tasks - increased sleep for stability under load
-                await asyncio.sleep(15)
+                
+                await asyncio.sleep(1)
                 
             except Exception as e:
                 self.log(f"Hub Main Loop Error: {e}")
                 await asyncio.sleep(5)
         
-        # Shutdown if not already handled by stop_all
+        # Final cleanup
+        self.running = False
         if self.workers:
             await self.stop_all()
+        
+        # FINAL STATUS UPDATE
+        await self.update_dashboard_json()
 
 if __name__ == "__main__":
     hub = AsyncCryScoutHub()

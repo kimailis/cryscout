@@ -66,13 +66,14 @@ def init_db():
     )
     ''')
     
-    # Signatures table
+    # Signatures table - Research Grade Schema
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS signatures (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         address TEXT,
         txid TEXT,
         vin INTEGER,
+        input_index INTEGER,
         r_hex TEXT,
         s_hex TEXT,
         z_hex TEXT,
@@ -83,8 +84,11 @@ def init_db():
         r_bits INTEGER,
         is_biased BOOLEAN,
         cluster_id INTEGER,
+        block_height INTEGER,
+        timestamp DATETIME,
+        script_type TEXT,
         found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(address, txid, vin, r_hex, s_hex),
+        UNIQUE(txid, vin, input_index, r_hex, s_hex),
         FOREIGN KEY (cluster_id) REFERENCES clusters (cluster_id)
     )
     ''')
@@ -219,6 +223,25 @@ def assign_sig_to_cluster(sig_id, cluster_id):
     conn.commit()
     conn.close()
 
+def mark_signatures_cluster(sig_ids, cluster_id):
+    """Assign multiple signatures to a cluster in a single batch transaction."""
+    if not sig_ids: return
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("BEGIN TRANSACTION")
+        # Use executemany for efficiency
+        cursor.executemany(
+            "UPDATE signatures SET cluster_id = ? WHERE id = ?",
+            [(cluster_id, sig_id) for sig_id in sig_ids]
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
 def get_cluster_signatures(cluster_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -241,8 +264,8 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
         # Re-scan every 3 days with potentially improved dictionaries/patterns
         stage_filter = "(sigs_scanned = 0 OR last_updated < datetime('now', '-3 days')) AND sigs_fetched = 1"
     elif stage == 'analyzing':
-        # Re-analyze every 1 day with potentially deeper lattice/algebraic parameters
-        stage_filter = "(analyzed = 0 OR last_updated < datetime('now', '-1 day')) AND sigs_fetched = 1"
+        # Re-analyze every 1 day or IF it has a High severity vulnerability that hasn't been cracked
+        stage_filter = "(analyzed = 0 OR last_updated < datetime('now', '-1 day') OR address IN (SELECT address FROM vulnerabilities WHERE severity = 'High')) AND sigs_fetched = 1"
     elif stage == 'forensic':
         # Forensic scans: Target P2PK and early Legacy addresses
         stage_filter = "(type LIKE 'P2PK%' OR address LIKE '1%') AND IFNULL(status, '') != 'Compromised'"
@@ -284,10 +307,14 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     UPDATE addresses 
     SET processing_by = ?, processing_since = CURRENT_TIMESTAMP
     WHERE address IN (
-        SELECT address FROM addresses 
-        WHERE (processing_by IS NULL OR processing_since < datetime('now', '-30 minutes'))
-        AND {stage_filter}
-        ORDER BY current_balance DESC, transactions DESC
+        SELECT a.address FROM addresses a
+        LEFT JOIN vulnerabilities v ON a.address = v.address
+        WHERE (a.processing_by IS NULL OR a.processing_since < datetime('now', '-30 minutes'))
+        AND {stage_filter.replace('address', 'a.address').replace('analyzed', 'a.analyzed').replace('status', 'a.status').replace('last_updated', 'a.last_updated').replace('sigs_fetched', 'a.sigs_fetched').replace('sigs_scanned', 'a.sigs_scanned').replace('neural_scanned', 'a.neural_scanned').replace('tcg_scanned', 'a.tcg_scanned').replace('brainwallet_scanned', 'a.brainwallet_scanned').replace('fail_att', 'a.fail_att')}
+        ORDER BY 
+            CASE WHEN v.severity = 'High' THEN 0 ELSE 1 END ASC,
+            a.current_balance DESC, 
+            a.transactions DESC
         LIMIT ?
     )
     ''', (worker_id, limit))
@@ -547,19 +574,19 @@ def get_stats():
         for addr, v_type, v_details, v_sev in vulns:
             if addr not in addr_probs: addr_probs[addr] = 1.0 # Initial fail prob for this addr
             
-            p = 0.0001
+            p = 0.00001 # 1 in 100,000 baseline for identified "vulnerability"
             if 'R-Reuse' in v_type:
-                p = 0.99 if 'Different Z' in str(v_details) else 0.01
+                p = 0.99 if 'Different Z' in str(v_details) else 0.005
             elif 'Spectral' in v_type:
-                p = 0.1 if v_sev == 'High' else 0.02
-            elif 'Neural' in v_type:
                 p = 0.05 if v_sev == 'High' else 0.01
-            elif 'Small R' in v_type:
+            elif 'Neural' in v_type:
                 p = 0.02 if v_sev == 'High' else 0.005
-            elif 'LSB Bias' in v_type:
+            elif 'Small R' in v_type:
                 p = 0.01 if v_sev == 'High' else 0.002
+            elif 'LSB Bias' in v_type:
+                p = 0.005 if v_sev == 'High' else 0.001
             elif 'TCG Norm' in v_type:
-                p = 0.001 
+                p = 0.0001 
                 
             # Bayesian recalibration: every failed attack reduces p_success
             f_str = fail_atts.get(addr, "")
@@ -575,13 +602,16 @@ def get_stats():
         
         # Calculate fleet-wide success probability
         total_fail_prob = 1.0
+        max_indiv = 0.0
         for addr in addr_probs:
             addr_success_p = 1.0 - addr_probs[addr]
+            if addr_success_p > max_indiv: max_indiv = addr_success_p
             total_fail_prob *= (1.0 - addr_success_p)
         
         stats['success_prob'] = (1.0 - total_fail_prob) * 100
+        stats['max_individual_prob'] = max_indiv * 100
     except:
-        pass
+        stats['max_individual_prob'] = 0.0
     
     conn.close()
     return stats
