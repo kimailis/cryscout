@@ -256,49 +256,49 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
     cursor = conn.cursor()
     
     # Define stage filter for continuous looping and improvement
-    stage_filter = "analyzed = 0"
+    stage_filter = "a.analyzed = 0"
     if stage == 'fetching':
         # Re-fetch data every 7 days to find new txs or leaks
-        stage_filter = "(sigs_fetched = 0 OR last_updated < datetime('now', '-7 days'))"
+        stage_filter = "(a.sigs_fetched = 0 OR a.last_updated < datetime('now', '-7 days'))"
     elif stage == 'scanning':
         # Re-scan every 3 days with potentially improved dictionaries/patterns
-        stage_filter = "(sigs_scanned = 0 OR last_updated < datetime('now', '-3 days')) AND sigs_fetched = 1"
+        stage_filter = "(a.sigs_scanned = 0 OR a.last_updated < datetime('now', '-3 days')) AND a.sigs_fetched = 1"
     elif stage == 'analyzing':
         # Re-analyze every 1 day or IF it has a High severity vulnerability that hasn't been cracked
-        stage_filter = "(analyzed = 0 OR last_updated < datetime('now', '-1 day') OR address IN (SELECT address FROM vulnerabilities WHERE severity = 'High')) AND sigs_fetched = 1"
+        stage_filter = "(a.analyzed = 0 OR a.last_updated < datetime('now', '-1 day') OR a.address IN (SELECT address FROM vulnerabilities WHERE severity = 'High')) AND a.sigs_fetched = 1"
     elif stage == 'forensic':
         # Forensic scans: Target P2PK and early Legacy addresses
-        stage_filter = "(type LIKE 'P2PK%' OR address LIKE '1%') AND IFNULL(status, '') != 'Compromised'"
+        stage_filter = "(a.type LIKE 'P2PK%' OR a.address LIKE '1%') AND IFNULL(a.status, '') != 'Compromised'"
     elif stage == 'neural':
         # Neural scans: Target addresses with sigs that haven't been neural scanned
-        stage_filter = "neural_scanned = 0 AND sigs_fetched = 1"
+        stage_filter = "a.neural_scanned = 0 AND a.sigs_fetched = 1"
     elif stage == 'tcg':
         # TCG scans: Target addresses with sigs that haven't been TCG scanned
-        stage_filter = "tcg_scanned = 0 AND sigs_fetched = 1"
+        stage_filter = "a.tcg_scanned = 0 AND a.sigs_fetched = 1"
     elif stage == 'vortex':
         # Vortex Harmonic & 3-6-9 scans: Target addresses not yet vortex_scanned
-        stage_filter = "vortex_scanned = 0 AND sigs_fetched = 1"
+        stage_filter = "a.vortex_scanned = 0 AND a.sigs_fetched = 1"
     elif stage == 'brainwallet':
         # Brainwallet scan: Any address not yet brainwallet-scanned
-        stage_filter = "brainwallet_scanned = 0 AND sigs_fetched = 1"
+        stage_filter = "a.brainwallet_scanned = 0 AND a.sigs_fetched = 1"
     elif stage == 'bruteforce':
         # Brute-force scans: Only if ALL 7 other techniques have failed at least 3 times
         # Format in DB is [ID.count],[ID.count]...
         # We check for [1.N] where N >= 3, [2.N] where N >= 3, etc.
         # This regex-like glob ensures we only pick up targets that have exhausted all other options.
         stage_filter = (
-            "sigs_fetched = 1 AND "
-            "fail_att GLOB '*[[]1.[3-9][]]*' AND "
-            "fail_att GLOB '*[[]2.[3-9][]]*' AND "
-            "fail_att GLOB '*[[]3.[3-9][]]*' AND "
-            "fail_att GLOB '*[[]4.[3-9][]]*' AND "
-            "fail_att GLOB '*[[]5.[3-9][]]*' AND "
-            "fail_att GLOB '*[[]6.[3-9][]]*' AND "
-            "fail_att GLOB '*[[]7.[3-9][]]*'"
+            "a.sigs_fetched = 1 AND "
+            "a.fail_att GLOB '*[[]1.[3-9][]]*' AND "
+            "a.fail_att GLOB '*[[]2.[3-9][]]*' AND "
+            "a.fail_att GLOB '*[[]3.[3-9][]]*' AND "
+            "a.fail_att GLOB '*[[]4.[3-9][]]*' AND "
+            "a.fail_att GLOB '*[[]5.[3-9][]]*' AND "
+            "a.fail_att GLOB '*[[]6.[3-9][]]*' AND "
+            "a.fail_att GLOB '*[[]7.[3-9][]]*'"
         )
     
     # Exclude already compromised addresses
-    stage_filter = f"({stage_filter}) AND IFNULL(status, '') != 'Compromised'"
+    stage_filter = f"({stage_filter}) AND IFNULL(a.status, '') != 'Compromised'"
 
     if extra_filter:
         stage_filter += f" AND {extra_filter}"
@@ -310,7 +310,7 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
         SELECT a.address FROM addresses a
         LEFT JOIN vulnerabilities v ON a.address = v.address
         WHERE (a.processing_by IS NULL OR a.processing_since < datetime('now', '-30 minutes'))
-        AND {stage_filter.replace('address', 'a.address').replace('analyzed', 'a.analyzed').replace('status', 'a.status').replace('last_updated', 'a.last_updated').replace('sigs_fetched', 'a.sigs_fetched').replace('sigs_scanned', 'a.sigs_scanned').replace('neural_scanned', 'a.neural_scanned').replace('tcg_scanned', 'a.tcg_scanned').replace('brainwallet_scanned', 'a.brainwallet_scanned').replace('fail_att', 'a.fail_att')}
+        AND {stage_filter}
         ORDER BY 
             CASE WHEN v.severity = 'High' THEN 0 ELSE 1 END ASC,
             a.current_balance DESC, 
