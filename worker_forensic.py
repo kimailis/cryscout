@@ -32,14 +32,14 @@ class ForensicWorker(BaseWorker):
                     update_fail_att(addr, 3)
                 
                 # 2. Check for Debian PID Vulnerability
-                if not self.scanner.scan_debian_pids():
+                if not self.scanner.scan_debian_pid_expanded():
                     update_fail_att(addr, 3)
                 
                 # 3. Check for Milk Sad (Mersenne Twister)
-                if not self.scanner.scan_milk_sad():
+                if not self.scanner.scan_milk_sad_mt():
                     update_fail_att(addr, 3)
                 
-                # 3. Targeted Randstorm (requires first_seen)
+                # 4. Targeted Randstorm (requires first_seen)
                 conn = get_connection()
                 c = conn.cursor()
                 c.execute("SELECT first_seen FROM addresses WHERE address = ?", (addr,))
@@ -47,7 +47,7 @@ class ForensicWorker(BaseWorker):
                 conn.close()
                 
                 if row and row[0]:
-                    if not self.scanner.scan_randstorm(addr, row[0]):
+                    if not self.scanner.scan_lcg_randstorm(addr, row[0]):
                         update_fail_att(addr, 3)
                 else:
                     update_fail_att(addr, 3)

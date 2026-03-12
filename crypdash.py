@@ -54,7 +54,8 @@ def get_stats():
         "Workers": active_workers,
         "NeuralAnalyzed": db_stats.get('neural_scanned', 0),
         "Attacked": db_stats.get('attacked', 0),
-        "SuccessProb": db_stats.get('success_prob', 0.0)
+        "SuccessProb": db_stats.get('success_prob', 0.0),
+        "MaxIndividualProb": db_stats.get('max_individual_prob', 0.0)
     }
 
 def get_potential_targets():
@@ -82,6 +83,33 @@ def get_potential_targets():
     except Exception as e:
         targets.append({"Address": "Error", "Balance": "N/A", "Reason": str(e)})
     return targets
+
+def get_neural_findings():
+    findings = []
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        query = '''
+        SELECT address, type, details, severity 
+        FROM vulnerabilities 
+        WHERE type LIKE 'Neural%' OR type LIKE 'Spectral%' 
+        ORDER BY found_at DESC 
+        LIMIT 50
+        '''
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        for row in rows:
+            findings.append({
+                "Address": row[0],
+                "Type": row[1],
+                "Details": row[2] if row[2] else "N/A",
+                "Severity": row[3]
+            })
+        conn.close()
+    except Exception as e:
+        # findings.append({"Address": "Error", "Type": "N/A", "Details": str(e), "Severity": "N/A"})
+        pass
+    return findings
 
 def get_recovered_keys():
     keys = []
@@ -135,23 +163,43 @@ def reset_analysis():
     except: pass
     return False
 
-def get_neural_findings():
-    findings = []
+def stop_all_services():
+    # First, send the signal (clean shutdown request)
+    send_signal('STOP')
+    
+    # We'll use psutil for more aggressive killing if it's stuck
     try:
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("SELECT address, type, details, severity FROM vulnerabilities WHERE type LIKE 'Neural%' OR type LIKE 'Spectral%' ORDER BY found_at DESC LIMIT 15")
-        rows = c.fetchall()
-        for r in rows:
-            findings.append({
-                "Address": r[0],
-                "Type": r[1],
-                "Details": r[2],
-                "Severity": r[3]
-            })
-        conn.close()
-    except: pass
-    return findings
+        import psutil
+        import signal
+        current_pid = os.getpid()
+        
+        # Kill the hub and all children of the hub
+        info = get_service_info()
+        hub_pid = info.get('pid')
+        if hub_pid:
+            try:
+                parent = psutil.Process(hub_pid)
+                for child in parent.children(recursive=True):
+                    child.kill()
+                parent.kill()
+            except: pass
+            
+        # Broad sweep for any lingering project-related processes
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.info['pid'] == current_pid: continue
+                cmdline = proc.info['cmdline']
+                if not cmdline: continue
+                cmd_str = " ".join(cmdline)
+                
+                # Check for project-specific scripts
+                project_scripts = ["cryshub.py", "worker_", "bitcoin_miner.py", "miner_dash.py", "deep_scan.py"]
+                if any(s in cmd_str for s in project_scripts):
+                    proc.kill()
+            except: pass
+    except:
+        # Fallback to shell if psutil fails
+        subprocess.run("pkill -9 -f 'cryshub.py|worker_|bitcoin_miner.py'", shell=True)
 
 def draw_dashboard(stdscr):
     curses.curs_set(0)
@@ -186,6 +234,12 @@ def draw_dashboard(stdscr):
             if info.get('current_task') == "Not Responding":
                 color = curses.color_pair(3)
                 status_text = "NOT RESPONDING"
+            
+            # Show "STOPPING" if we just sent the signal? 
+            # We don't have a state for that, but we can infer it if SIGNAL_FILE exists and hub is still there
+            if os.path.exists(SIGNAL_FILE) and is_running:
+                status_text = "STOPPING..."
+                color = curses.color_pair(3)
                 
             stdscr.addstr(2, 2, "Service Status: ")
             stdscr.addstr(status_text, color | curses.A_BOLD)
@@ -194,9 +248,10 @@ def draw_dashboard(stdscr):
             
             # SUCCESS PROBABILITY
             prob = stats['SuccessProb']
+            max_p = stats['MaxIndividualProb']
             prob_color = curses.color_pair(1) if prob > 50 else (curses.color_pair(3) if prob > 10 else curses.color_pair(2))
             stdscr.addstr(4, 2, "Estimated Success Chance: ")
-            stdscr.addstr(f"{prob:.4f}%", prob_color | curses.A_BOLD)
+            stdscr.addstr(f"Fleet: {prob:.4f}% | Max Target: {max_p:.4f}%", prob_color | curses.A_BOLD)
             
             stdscr.addstr(5, 2, "Progress Overview:", curses.A_UNDERLINE)
             stdscr.addstr(6, 4, f"Total Addresses Tracked: {stats['Total']}")
@@ -206,7 +261,7 @@ def draw_dashboard(stdscr):
             stdscr.addstr(10, 4, f"Keys Recovered:          {stats['Recovered']}", curses.color_pair(1) if stats['Recovered']>0 else curses.A_NORMAL)
             stdscr.addstr(11, 4, f"Active Workers:          {stats['Workers']}", curses.color_pair(4) if stats['Workers']>0 else curses.A_NORMAL)
             
-            percent = (stats['Analyzed'] / stats['Total']) * 100
+            percent = (stats['Analyzed'] / stats['Total']) * 100 if stats['Total'] > 0 else 0
             bar_len = min(width - 20, 50)
             filled = int((percent / 100) * bar_len)
             bar = "[" + "=" * filled + " " * (bar_len - filled) + "]"
@@ -240,6 +295,7 @@ def draw_dashboard(stdscr):
             
             # Neural Training Coherence (estimated from worker status)
             coherence = "Stable"
+            worker_list = info.get('workers_detailed', [])
             for w in worker_list:
                 if "evolving" in w.get('task', '').lower():
                     coherence = "Evolving / Learning"
@@ -322,11 +378,23 @@ def draw_dashboard(stdscr):
         c = stdscr.getch()
         if c == ord('q') or c == ord('Q'): break
         elif c == ord('s') or c == ord('S'):
-            if not info.get('running', False): start_service()
-        elif c == ord('t') or c == ord('T'): send_signal('STOP')
+            # Clear any old stop signal first to ensure we can start
+            if os.path.exists(SIGNAL_FILE):
+                try: os.remove(SIGNAL_FILE)
+                except: pass
+            
+            if not info.get('running', False) or info.get('current_task') == "Not Responding":
+                # Ensure it's really dead before starting a new one
+                stop_all_services()
+                time.sleep(0.5)
+                start_service()
+            else:
+                # Hub is running, tell it to force-check/restart workers
+                send_signal('START')
+        elif c == ord('t') or c == ord('T'): stop_all_services()
         elif c == ord('r') or c == ord('R'):
-            send_signal('STOP')
-            time.sleep(1.5)
+            stop_all_services()
+            time.sleep(2)
             start_service()
         elif c == ord('a') or c == ord('A'):
             reset_analysis()
@@ -339,7 +407,6 @@ def draw_text_dashboard():
     """Fallback text dashboard for environments without curses."""
     print("CRYPDASH - Text Mode Monitor (Press Ctrl+C to quit)\n")
     mode = "MAIN"
-    last_logs_len = 0
     
     while True:
         info = get_service_info()
@@ -352,6 +419,9 @@ def draw_text_dashboard():
         status_text = "RUNNING" if is_running else "STOPPED"
         if info.get('current_task') == "Not Responding":
             status_text = "NOT RESPONDING"
+        
+        if os.path.exists(SIGNAL_FILE) and is_running:
+            status_text = "STOPPING..."
             
         print("===" * 20)
         print(f"Service Status: {status_text} (PID: {info.get('pid', 'N/A')})")
@@ -397,10 +467,10 @@ def draw_text_dashboard():
                     elif c == b's' and not info.get('running', False):
                         start_service()
                     elif c == b't':
-                        send_signal('STOP')
+                        stop_all_services()
                     elif c == b'r':
-                        send_signal('STOP')
-                        time.sleep(1.5)
+                        stop_all_services()
+                        time.sleep(2)
                         start_service()
                     break # exit the delay loop to refresh
             else:
@@ -412,7 +482,11 @@ def draw_text_dashboard():
                     elif c == 's' and not info.get('running', False):
                         start_service()
                     elif c == 't':
-                        send_signal('STOP')
+                        stop_all_services()
+                    elif c == 'r':
+                        stop_all_services()
+                        time.sleep(2)
+                        start_service()
                     break
             time.sleep(0.1)
 

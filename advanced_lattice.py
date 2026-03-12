@@ -60,11 +60,16 @@ def lll_reduce(basis, delta=0.99):
         return dot(v, u) / d if d != 0 else 0
 
     k = 1
-    max_iter = n * n * 10
+    max_iter = n * 50 # Heuristic limit to prevent infinite loops in pure Python
     iteration = 0
+    start_time = time.time()
 
     while k < n and iteration < max_iter:
         iteration += 1
+        # Safety: Pure Python LLL is slow; don't hang worker for more than 30s per reduce
+        if time.time() - start_time > 30:
+            break
+            
         ortho, mu = gram_schmidt(basis)
 
         # Size reduction

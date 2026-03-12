@@ -2,6 +2,8 @@ requests
 beautifulsoup4
 pandas
 ecdsa
+fastecdsa
+cryptography
 base58
 psutil
 mpmath
@@ -9,3 +11,5 @@ mnemonic
 bip32utils
 scikit-learn
 torch
+numpy
+numba

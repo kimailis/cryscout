@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import hashlib
 import binascii
+from numba import njit
 
 class SpinGlassManifoldNet(nn.Module):
     def __init__(self, input_dim=256, hidden_dim=512, layers=20):
@@ -21,10 +22,26 @@ class SpinGlassManifoldNet(nn.Module):
                 x = x + 0.1 * torch.sin(x * np.pi) 
         return torch.sigmoid(self.output(x))
 
+@njit
 def get_digital_root(n):
     if n == 0:
         return 0
     return 1 + ((n - 1) % 9)
+
+@njit
+def _analyze_vortex_numba(roots_arr):
+    n = len(roots_arr)
+    found_369 = 0
+    for i in range(n):
+        # We inline get_digital_root logic here or call it if numba allows
+        val = roots_arr[i]
+        r = 1 + ((val - 1) % 9) if val > 0 else 0
+        if r == 3 or r == 6 or r == 9:
+            found_369 += 1
+    
+    purity = 1.0 - (found_369 / n)
+    is_anomalous = purity > 0.85
+    return is_anomalous, purity
 
 def analyze_vortex_periodicity(hex_str):
     """
@@ -39,26 +56,32 @@ def analyze_vortex_periodicity(hex_str):
 
     # Convert the integer to a string to analyze digit groupings
     val_str = str(val)
-    roots = []
+    chunks = []
+    # PERFORMANCE TIP: Cache method references to avoid dot-lookup in loops
+    _append = chunks.append
+    _int = int
+    
     # Sample in 4-digit chunks to find local digital roots
     for i in range(0, len(val_str), 4):
         chunk = val_str[i:i+4]
         if chunk:
-            roots.append(get_digital_root(int(chunk)))
+            _append(_int(chunk))
     
-    # Check for exclusion of 3, 6, 9
-    excluded = {3, 6, 9}
-    found_369 = sum(1 for r in roots if r in excluded)
-    
-    # Calculate "Vortex Purity Score"
-    if not roots:
+    if not chunks:
         return False, 0.0
         
-    purity = 1.0 - (found_369 / len(roots))
-    
-    # If high purity (meaning very few 3,6,9s), it's anomalous
-    is_anomalous = purity > 0.85
-    return is_anomalous, purity
+    roots_arr = np.array(chunks, dtype=np.int64)
+    return _analyze_vortex_numba(roots_arr)
+
+# Global model instance for reuse
+_SPIN_GLASS_MODEL = None
+
+def get_spin_glass_model():
+    global _SPIN_GLASS_MODEL
+    if _SPIN_GLASS_MODEL is None:
+        _SPIN_GLASS_MODEL = SpinGlassManifoldNet()
+        _SPIN_GLASS_MODEL.eval() # Set to evaluation mode
+    return _SPIN_GLASS_MODEL
 
 def simulate_spin_glass_binding(pubkey_hex):
     """
@@ -73,8 +96,7 @@ def simulate_spin_glass_binding(pubkey_hex):
             
         tensor_in = torch.tensor([int(b) for b in bin_str], dtype=torch.float32)
         
-        # We load or create a dummy model for the "manifold navigation"
-        model = SpinGlassManifoldNet()
+        model = get_spin_glass_model()
         with torch.no_grad():
             manifold_output = model(tensor_in)
             

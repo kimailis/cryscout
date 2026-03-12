@@ -20,25 +20,41 @@ class NeuralWorker(BaseWorker):
         self.training_thread.start()
         
     def _continuous_training_loop(self):
-        self.log("Starting continuous evolutionary training thread...")
+        self.log("Neural training thread starting (Feedback Mode)...")
         while self.running:
-            self.is_training = True
+            # ONLY retrain if we have actual findings in the database to learn from
             try:
-                # Load current models to fine-tune them
-                ff_model, lstm_model = load_models()
+                conn = get_connection()
+                c = conn.cursor()
+                # Check if we have any High/Critical findings or recovered keys
+                c.execute("SELECT COUNT(*) FROM vulnerabilities WHERE severity IN ('High', 'Critical')")
+                finding_count = c.fetchone()[0]
                 
-                # Small training batches to adapt to mutations continuously
-                train_model(epochs=3, n_samples=15000, model=ff_model)
-                train_lstm_model(epochs=3, n_samples=8000, model=lstm_model)
+                c.execute("SELECT COUNT(*) FROM recovered_keys")
+                key_count = c.fetchone()[0]
+                conn.close()
                 
-                self.training_cycle_count += 1
-                self.log(f"Completed evolutionary training cycle {self.training_cycle_count}")
+                if finding_count > 0 or key_count > 0 or self.training_cycle_count == 0:
+                    self.is_training = True
+                    self.log(f"Evolutionary training cycle {self.training_cycle_count + 1}...")
+                    
+                    ff_model, lstm_model = load_models()
+                    # We still use some synthetic data but now it's targeted
+                    train_model(epochs=1, n_samples=2000, model=ff_model)
+                    time.sleep(2)
+                    train_lstm_model(epochs=1, n_samples=1000, model=lstm_model)
+                    
+                    self.training_cycle_count += 1
+                    self.log(f"Completed cycle {self.training_cycle_count}")
+                    self.is_training = False
+                
             except Exception as e:
                 self.log(f"Training error: {e}")
-            self.is_training = False
+                self.is_training = False
             
-            # Briefly yield to allow the scanner to take priority if needed
-            for _ in range(15):
+            # Sleep much longer between checks - evolution takes time
+            # Check every hour instead of every minute
+            for _ in range(3600):
                 if not self.running: break
                 time.sleep(1)
 

@@ -18,6 +18,7 @@ import random
 import struct
 import time
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -37,100 +38,133 @@ LSTM_MODEL_PATH = 'spectral_bias_lstm.pt'
 # ============================================================
 
 def extract_features(r_values):
-    """Extract a fixed-size feature vector from a list of R-values (ints)."""
-    if len(r_values) < 2:
+    """Extract a fixed-size feature vector from a list of R-values (ints). Optimized with NumPy and cached methods."""
+    n = len(r_values)
+    if n < 2:
         return None
 
-    features = []
-
-    # 1. Bit distribution (256 features): fraction of R-values with bit i set
-    bit_counts = [0] * 256
+    # Performance Tip: Cache references for hot loops
+    r_bytes_list = []
+    _append = r_bytes_list.append
+    _P = P # Global to local
+    
+    # Convert large ints to 32-byte arrays for vectorized processing
     for r in r_values:
-        for bit in range(256):
-            if (r >> bit) & 1:
-                bit_counts[bit] += 1
-    n = len(r_values)
-    features.extend([c / n for c in bit_counts])
+        try:
+            _append(r.to_bytes(32, 'big'))
+        except OverflowError:
+            _append((r % _P).to_bytes(32, 'big'))
+            
+    data = np.frombuffer(b''.join(r_bytes_list), dtype=np.uint8).reshape(n, 32)
+    features = []
+    _f_append = features.append
+    _f_extend = features.extend
 
-    # 2. Byte entropy (32 features): Shannon entropy of each byte position
-    for byte_pos in range(32):
-        byte_vals = [(r >> (byte_pos * 8)) & 0xFF for r in r_values]
-        from collections import Counter
-        counts = Counter(byte_vals)
-        entropy = -sum((c / n) * math.log2(c / n) for c in counts.values() if c > 0)
-        features.append(entropy / 8.0)  # Normalize to [0, 1]
+    # 1. Bit distribution (256 features)
+    bits = np.unpackbits(data, axis=1) # (n, 256)
+    bit_dist = bits.mean(axis=0)
+    _f_extend(bit_dist.tolist())
 
-    # 3. LSB pattern vector (16 features): distribution of R mod 2^k for k=1..16
+    # 2. Byte entropy (32 features)
+    _np_bincount = np.bincount
+    _np_sum = np.sum
+    _np_log2 = np.log2
+    for i in range(32):
+        col = data[:, i]
+        counts = _np_bincount(col, minlength=256)
+        p = counts[counts > 0] / n
+        entropy = -_np_sum(p * _np_log2(p)) / 8.0 # Normalized to [0, 1]
+        _f_append(float(entropy))
+
+    # 3. LSB pattern vector (16 features): distribution of R mod 2^k
+    # We can use bit manipulation on the last 2 bytes for k=1..16
+    last_two_bytes = (data[:, 30].astype(np.uint16) << 8) | data[:, 31]
     for k in range(1, 17):
         mod = 1 << k
-        residues = [r % mod for r in r_values]
-        counts = Counter(residues)
-        most_common_ratio = counts.most_common(1)[0][1] / n
-        features.append(most_common_ratio)
+        residues = last_two_bytes % mod
+        unique, counts = np.unique(residues, return_counts=True)
+        most_common_ratio = counts.max() / n if len(counts) > 0 else 0
+        features.append(float(most_common_ratio))
 
     # 4. MSB pattern vector (16 features): bit-length distribution
-    bit_lengths = [r.bit_length() for r in r_values]
-    bl_counts = Counter(bit_lengths)
+    # Find first non-zero bit from left for each R-value
+    # bits is (n, 256). We want the index of the first 1 in each row.
+    # Note: argmax returns first index of max value (1)
+    has_one = bits.any(axis=1)
+    first_one_idx = bits.argmax(axis=1)
+    bit_lengths = 256 - first_one_idx
+    bit_lengths[~has_one] = 0
+    
     for target_bl in range(241, 257):
-        features.append(bl_counts.get(target_bl, 0) / n)
+        ratio = (bit_lengths == target_bl).sum() / n
+        features.append(float(ratio))
 
     # 5. Inter-signature R deltas (32 features): statistics of consecutive differences
-    deltas = []
-    sorted_r = sorted(r_values)
-    for i in range(1, len(sorted_r)):
-        delta = sorted_r[i] - sorted_r[i - 1]
-        deltas.append(delta)
-
-    if deltas:
-        delta_bits = [d.bit_length() for d in deltas]
-        delta_bl_counts = Counter(delta_bits)
+    r_arr = np.array(r_values, dtype=object) # Use object for large ints
+    sorted_r = np.sort(r_arr)
+    deltas = np.diff(sorted_r)
+    
+    if len(deltas) > 0:
+        # bit_length() for large ints isn't vectorized in numpy, so we use list comp
+        delta_bits = [int(d).bit_length() for d in deltas]
+        delta_bits_arr = np.array(delta_bits)
         for target in range(224, 256):
-            features.append(delta_bl_counts.get(target, 0) / len(deltas))
+            ratio = (delta_bits_arr == target).sum() / len(deltas)
+            features.append(float(ratio))
     else:
-        features.extend([0] * 32)
+        features.extend([0.0] * 32)
 
     # 6. Modular residues (6 features): R mod small primes
     for prime in [2, 3, 5, 7, 11, 13]:
-        residues = [r % prime for r in r_values]
-        counts = Counter(residues)
+        # Vectorized mod for object array (large ints)
+        residues = r_arr % prime
+        unique, counts = np.unique(residues, return_counts=True)
+        counts_full = np.zeros(prime)
+        counts_full[unique.astype(int)] = counts
         expected = n / prime
-        chi2 = sum((counts.get(i, 0) - expected) ** 2 / expected for i in range(prime))
-        features.append(min(chi2 / 100.0, 1.0))  # Normalize
+        chi2 = np.sum((counts_full - expected) ** 2 / expected)
+        features.append(float(min(chi2 / 100.0, 1.0)))
 
-    # 7. Autocorrelation (16 features): correlation of R[i] with R[i+lag]
-    r_normalized = [(r - sum(r_values) / n) for r in r_values]
-    var = sum(x * x for x in r_normalized) / n if n > 0 else 1
-    for lag in range(1, 17):
-        if lag < len(r_normalized) and var > 0:
-            autocorr = sum(r_normalized[i] * r_normalized[i + lag]
-                           for i in range(len(r_normalized) - lag)) / (n * var)
-            features.append(max(-1, min(1, float(autocorr))))
+    # 7. Autocorrelation (16 features)
+    # Using float approximation for autocorrelation
+    r_floats = np.array([float(r % (1 << 53)) for r in r_values]) # Use 53 bits precision
+    if n > 1:
+        mean_r = np.mean(r_floats)
+        r_norm = r_floats - mean_r
+        var = np.var(r_floats)
+        if var > 0:
+            for lag in range(1, 17):
+                if lag < n:
+                    corr = np.corrcoef(r_norm[:-lag], r_norm[lag:])[0, 1]
+                    features.append(float(np.nan_to_num(corr)))
+                else:
+                    features.append(0.0)
         else:
-            features.append(0.0)
+            features.extend([0.0] * 16)
+    else:
+        features.extend([0.0] * 16)
 
-    # 8. FFT magnitude (32 features): frequency domain analysis
-    if len(r_values) >= 4:
-        signal = [float(r.bit_length()) for r in r_values[:256]]
-        pad_len = 1
-        while pad_len < len(signal):
-            pad_len *= 2
-        signal.extend([0.0] * (pad_len - len(signal)))
-        N = len(signal)
-        for k in range(32):
-            real = sum(signal[n_] * math.cos(2 * math.pi * k * n_ / N) for n_ in range(N))
-            imag = sum(signal[n_] * math.sin(2 * math.pi * k * n_ / N) for n_ in range(N))
-            mag = math.sqrt(real * real + imag * imag) / N
-            features.append(min(mag / 10.0, 1.0))
+    # 8. FFT magnitude (32 features)
+    if n >= 4:
+        # Use bit lengths as the signal for FFT
+        signal = bit_lengths[:256].astype(float)
+        # Pad to power of 2
+        pad_len = 1 << (len(signal) - 1).bit_length()
+        fft_vals = np.fft.fft(signal, n=pad_len)
+        mags = np.abs(fft_vals)[:32] / n
+        features.extend(np.minimum(mags / 10.0, 1.0).tolist())
     else:
         features.extend([0.0] * 32)
     
     # 9. Reverse Entropy Features (32 features)
     rev_entropy_feats = get_reverse_entropy_features(r_values)
-    features.extend(rev_entropy_feats)
+    _f_extend(rev_entropy_feats)
 
     # Pad/truncate to FEATURE_DIM
-    features = features[:FEATURE_DIM]
-    features.extend([0.0] * (FEATURE_DIM - len(features)))
+    if len(features) > FEATURE_DIM:
+        features = features[:FEATURE_DIM]
+    else:
+        features += [0.0] * (FEATURE_DIM - len(features))
 
     return features
 
@@ -142,12 +176,19 @@ def extract_features(r_values):
 def extract_sequence(r_values, max_len=20):
     """Extract a bit sequence for the LSTM model. Focuses on the lowest 64 bits to find PRNG connections."""
     seq = []
+    _append = seq.append
+    # PERFORMANCE TIP: Use a local range for bit shift
+    _bit_range = range(64)
+    
     for r in r_values[:max_len]:
-        bits = [(r >> i) & 1 for i in range(64)]
-        seq.append(bits)
-    # Pad if necessary
-    while len(seq) < max_len:
-        seq.append([0]*64)
+        bits = [(r >> i) & 1 for i in _bit_range]
+        _append(bits)
+        
+    # Pad if necessary using fast list addition
+    if len(seq) < max_len:
+        padding = [[0]*64] * (max_len - len(seq))
+        seq += padding
+        
     return seq
 
 
