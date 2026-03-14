@@ -15,8 +15,21 @@ SIGNAL_FILE = 'service_signal.txt'
 MAX_CPU_PERCENT = 70.0
 MAX_RAM_PERCENT = 95.0
 
-# Global log buffer
+# Global status variables
 log_buffer = []
+service_running = True
+current_task = "Starting up..."
+
+def heartbeat_loop():
+    global service_running, current_task
+    while service_running:
+        try:
+            # Periodically update the status file with usage stats
+            update_status(True, current_task)
+        except: pass
+        for _ in range(15):
+            if not service_running: break
+            time.sleep(1)
 
 def service_log(message):
     global log_buffer
@@ -87,7 +100,9 @@ def get_system_stats():
         pass
     return cpu_usage, ram_usage
 
-def update_status(is_running, current_task="Idle"):
+def update_status(is_running, task=None):
+    global current_task
+    if task: current_task = task
     cpu, ram = get_system_stats()
     status = {
         "running": is_running,
@@ -104,11 +119,13 @@ def update_status(is_running, current_task="Idle"):
     except: pass
 
 def check_stop_signal():
+    global service_running
     if os.path.exists(SIGNAL_FILE):
         sig = ""
         with open(SIGNAL_FILE, 'r') as f:
             sig = f.read().strip()
         if sig == 'STOP':
+            service_running = False
             update_status(False, "Stopped")
             try:
                 os.remove(SIGNAL_FILE)
@@ -118,11 +135,18 @@ def check_stop_signal():
     return False
 
 def main_loop():
+    global service_running, current_task
+    
+    # Start background heartbeat thread
+    import threading
+    h_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    h_thread.start()
+    
     service_log("Crypservice Engine Online. Background Scanner Active.")
     cycle = 0
     
     # We will loop through all available scanners indefinitely
-    while True:
+    while service_running:
         if check_stop_signal(): break
         
         cpu, ram = get_system_stats()
@@ -226,17 +250,6 @@ def main_loop():
             except Exception as e:
                 service_log(f"Collision solver error: {str(e)[:60]}")
             
-            if check_stop_signal(): break
-
-            # Phase 9 (Phase 3.1): Neural Network Nonce Anomaly Detector
-            update_status(True, f"[Cycle {cycle}] Phase 9/13: Neural Net Anomaly Detector")
-            service_log("--- Running Neural Network Anomaly Scan ---")
-            try:
-                from nonce_neural_detector import scan_addresses_with_nn
-                scan_addresses_with_nn(max_addresses=30)
-            except Exception as e:
-                service_log(f"Neural net error: {str(e)[:60]}")
-
             if check_stop_signal(): break
 
             # Phase 10 (Phase 3.2): Advanced Lattice Reduction (BKZ)

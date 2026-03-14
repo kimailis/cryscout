@@ -66,8 +66,8 @@ def lll_reduce(basis, delta=0.99):
 
     while k < n and iteration < max_iter:
         iteration += 1
-        # Safety: Pure Python LLL is slow; don't hang worker for more than 30s per reduce
-        if time.time() - start_time > 30:
+        # Safety: Pure Python LLL is slow; don't hang worker for more than 60s per reduce
+        if time.time() - start_time > 60:
             break
             
         ortho, mu = gram_schmidt(basis)
@@ -110,6 +110,7 @@ def bkz_reduce(basis, block_size=20, delta=0.99):
 
     # Then do BKZ tours
     for tour in range(3):  # Multiple tours for convergence
+        time.sleep(0.1) # Yield CPU between tours
         for k in range(n - block_size + 1):
             end = min(k + block_size, n)
             block = [list(basis[i]) for i in range(k, end)]
@@ -177,18 +178,19 @@ def progressive_lattice_attack(address, max_dim=30):
     print(f"    Progressive lattice: {len(sigs)} sigs available")
 
     # Try increasing dimensions with different bias assumptions
-    for bias_bits in [4, 8, 16, 32, 64, 128]:
-        for dim in [4, 6, 8, 12, 16, 20, min(len(sigs), max_dim)]:
+    for bias_bits in [8, 16, 32]:
+        for dim in [8, 16, 30]:
             if dim > len(sigs):
-                break
+                if dim == 8: break # Need at least 8 for this loop
+                dim = len(sigs)
 
             subset = sigs[:dim]
 
             # Try MSB bias
-            for transform in ['msb', 'lsb']:
+            for transform in ['msb']: 
                 try:
                     matrix, B = build_hnp_lattice(subset, bias_bits, transform)
-                    reduced = bkz_reduce(matrix, block_size=min(dim, 20))
+                    reduced = lll_reduce(matrix) # LLL is faster than BKZ
 
                     # Check short vectors for the private key
                     for row in reduced:
@@ -201,8 +203,11 @@ def progressive_lattice_attack(address, max_dim=30):
 
                         # Also try dividing by B
                         if B > 0:
-                            d_candidates.append((candidate * pow(B, -1, P)) % P)
-                            d_candidates.append((P - (candidate * pow(B, -1, P)) % P) % P)
+                            try:
+                                inv_B = pow(int(B), -1, P)
+                                d_candidates.append((int(candidate) * inv_B) % P)
+                                d_candidates.append((P - (int(candidate) * inv_B) % P) % P)
+                            except: pass
 
                         for d in d_candidates:
                             if 0 < d < P and verify_key(d, address):
@@ -210,9 +215,9 @@ def progressive_lattice_attack(address, max_dim=30):
                 except Exception:
                     continue
 
-    # Also try the existing solve_hnp with more bias values
-    for bias in [4, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64, 80, 96, 128]:
-        for window_start in range(0, len(sigs) - 3, max(1, len(sigs) // 5)):
+    # Also try the existing solve_hnp with fewer bias values
+    for bias in [8, 16, 32]:
+        for window_start in range(0, len(sigs) - 3, max(1, len(sigs) // 3)):
             window = sigs[window_start:window_start + min(30, len(sigs))]
             key = solve_hnp(window, bias, address=address)
             if key:

@@ -53,9 +53,8 @@ class ForensicWorker(BaseWorker):
                     update_fail_att(addr, 3)
 
                 # Mark forensic stage as done for this address
-                # We can reuse mark_analyzed or a custom flag if we add it
-                from db_manager import mark_analyzed
-                mark_analyzed(addr)
+                from db_manager import mark_stage_done
+                mark_stage_done(addr, 'forensic', self.worker_id)
                 
             except Exception as e:
                 self.log(f"Forensic Error on {addr}: {e}")

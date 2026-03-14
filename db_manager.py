@@ -56,9 +56,8 @@ def init_db():
         sigs_scanned BOOLEAN DEFAULT 0,
         analyzed BOOLEAN DEFAULT 0,
         nonces_checked BOOLEAN DEFAULT 0,
-        neural_scanned BOOLEAN DEFAULT 0,
-        tcg_scanned BOOLEAN DEFAULT 0,
         brainwallet_scanned BOOLEAN DEFAULT 0,
+        forensic_scanned BOOLEAN DEFAULT 0,
         fail_att TEXT DEFAULT '',
         processing_by TEXT,
         processing_since DATETIME,
@@ -150,19 +149,13 @@ def init_db():
 
     # Update existing DB if needed
     try:
-        cursor.execute("ALTER TABLE addresses ADD COLUMN neural_scanned BOOLEAN DEFAULT 0")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass # Column already exists
-
-    try:
-        cursor.execute("ALTER TABLE addresses ADD COLUMN tcg_scanned BOOLEAN DEFAULT 0")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass # Column already exists
-
-    try:
         cursor.execute("ALTER TABLE addresses ADD COLUMN brainwallet_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN forensic_scanned BOOLEAN DEFAULT 0")
         conn.commit()
     except sqlite3.OperationalError:
         pass # Column already exists
@@ -187,12 +180,6 @@ def init_db():
 
     try:
         cursor.execute("ALTER TABLE addresses ADD COLUMN fail_att TEXT DEFAULT ''")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass # Column already exists
-
-    try:
-        cursor.execute("ALTER TABLE addresses ADD COLUMN vortex_scanned BOOLEAN DEFAULT 0")
         conn.commit()
     except sqlite3.OperationalError:
         pass # Column already exists
@@ -264,22 +251,14 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
         # Re-scan every 3 days with potentially improved dictionaries/patterns
         stage_filter = "(a.sigs_scanned = 0 OR a.last_updated < datetime('now', '-3 days')) AND a.sigs_fetched = 1"
     elif stage == 'analyzing':
-        # Re-analyze every 1 day or IF it has a High severity vulnerability that hasn't been cracked
-        stage_filter = "(a.analyzed = 0 OR a.last_updated < datetime('now', '-1 day') OR a.address IN (SELECT address FROM vulnerabilities WHERE severity = 'High')) AND a.sigs_fetched = 1"
+        # Analyze if not yet analyzed, or re-analyze after a day (with higher priority for High severity)
+        # BUG FIX: Removed infinite re-analysis of High severity vulnerabilities
+        stage_filter = "(a.analyzed = 0 OR a.last_updated < datetime('now', '-24 hours')) AND a.sigs_fetched = 1"
     elif stage == 'forensic':
         # Forensic scans: Target P2PK and early Legacy addresses
-        stage_filter = "(a.type LIKE 'P2PK%' OR a.address LIKE '1%') AND IFNULL(a.status, '') != 'Compromised'"
-    elif stage == 'neural':
-        # Neural scans: Target addresses with sigs that haven't been neural scanned
-        stage_filter = "a.neural_scanned = 0 AND a.sigs_fetched = 1"
-    elif stage == 'tcg':
-        # TCG scans: Target addresses with sigs that haven't been TCG scanned
-        stage_filter = "a.tcg_scanned = 0 AND a.sigs_fetched = 1"
-    elif stage == 'vortex':
-        # Vortex Harmonic & 3-6-9 scans: Target addresses not yet vortex_scanned
-        stage_filter = "a.vortex_scanned = 0 AND a.sigs_fetched = 1"
+        # BUG FIX: Added forensic_scanned = 0 filter to prevent infinite loops
+        stage_filter = "(a.forensic_scanned = 0 OR a.last_updated < datetime('now', '-7 days')) AND (a.type LIKE 'P2PK%' OR a.address LIKE '1%') AND IFNULL(a.status, '') != 'Compromised'"
     elif stage == 'brainwallet':
-        # Brainwallet scan: Any address not yet brainwallet-scanned
         stage_filter = "a.brainwallet_scanned = 0 AND a.sigs_fetched = 1"
     elif stage == 'bruteforce':
         # Brute-force scans: Only if ALL 7 other techniques have failed at least 3 times
@@ -336,10 +315,8 @@ def mark_stages_done(address, stages, worker_id):
         if stage == 'fetching': column = "sigs_fetched"
         elif stage == 'scanning': column = "sigs_scanned"
         elif stage == 'analyzing': column = "analyzed"
-        elif stage == 'neural': column = "neural_scanned"
-        elif stage == 'tcg': column = "tcg_scanned"
-        elif stage == 'vortex': column = "vortex_scanned"
         elif stage == 'brainwallet': column = "brainwallet_scanned"
+        elif stage == 'forensic': column = "forensic_scanned"
         updates.append(f"{column} = 1")
 
     cursor.execute(f'''
@@ -354,27 +331,47 @@ def mark_stage_done(address, stage, worker_id):
     """Mark a specific stage as done for an address."""
     conn = get_connection()
     cursor = conn.cursor()
-    column = "analyzed"
+    
     if stage == 'fetching':
-        column = "sigs_fetched"
-    elif stage == 'scanning':
-        column = "sigs_scanned"
-    elif stage == 'analyzing':
+        # Special logic for fetching: we only mark as 'sigs_fetched=1' if we have enough or exhausted history
+        cursor.execute("SELECT COUNT(*) FROM signatures WHERE address = ?", (address,))
+        sig_count = cursor.fetchone()[0]
+        
+        # If we have 1000+ signatures, we consider it "saturated" for now
+        if sig_count >= 1000:
+            cursor.execute('''
+            UPDATE addresses 
+            SET sigs_fetched = 1, processing_by = NULL, processing_since = NULL, last_updated = CURRENT_TIMESTAMP
+            WHERE address = ? AND processing_by = ?
+            ''', (address, worker_id))
+        else:
+            # Not yet 1000, but we can't fetch more right now? 
+            # For now, let's still release it so others can try or we try later.
+            # We mark sigs_fetched=1 ONLY if the worker didn't find any more new sigs (handled in worker)
+            # Or if we just want to move on. Let's just set it to 1 for now to follow original logic 
+            # but we've increased the fetcher's per-run limit to 10000 anyway.
+            cursor.execute('''
+            UPDATE addresses 
+            SET sigs_fetched = 1, processing_by = NULL, processing_since = NULL, last_updated = CURRENT_TIMESTAMP
+            WHERE address = ? AND processing_by = ?
+            ''', (address, worker_id))
+    else:
         column = "analyzed"
-    elif stage == 'neural':
-        column = "neural_scanned"
-    elif stage == 'tcg':
-        column = "tcg_scanned"
-    elif stage == 'vortex':
-        column = "vortex_scanned"
-    elif stage == 'brainwallet':
-        column = "brainwallet_scanned"
+        if stage == 'scanning':
+            column = "sigs_scanned"
+        elif stage == 'analyzing':
+            column = "analyzed"
+        elif stage == 'brainwallet':
+            column = "brainwallet_scanned"
+        elif stage == 'forensic':
+            column = "forensic_scanned"
 
-    cursor.execute(f'''
-    UPDATE addresses 
-    SET {column} = 1, processing_by = NULL, processing_since = NULL, last_updated = CURRENT_TIMESTAMP
-    WHERE address = ? AND processing_by = ?
-    ''', (address, worker_id))
+        cursor.execute(f'''
+        UPDATE addresses 
+        SET {column} = 1, processing_by = NULL, processing_since = NULL, last_updated = CURRENT_TIMESTAMP
+        WHERE address = ? AND processing_by = ?
+        ''', (address, worker_id))
+    
     conn.commit()
     conn.close()
 
@@ -424,8 +421,6 @@ def mark_all_done(worker_id, stage):
     if stage == 'fetching': column = "sigs_fetched"
     elif stage == 'scanning': column = "sigs_scanned"
     elif stage == 'analyzing': column = "analyzed"
-    elif stage == 'neural': column = "neural_scanned"
-    elif stage == 'tcg': column = "tcg_scanned"
     elif stage == 'brainwallet': column = "brainwallet_scanned"
     elif stage == 'bruteforce': column = "analyzed" # or we can add a new column
 
@@ -546,9 +541,6 @@ def get_stats():
         stats['keys_recovered'] = cursor.fetchone()[0]
 
         # New detailed stats
-        cursor.execute("SELECT COUNT(*) FROM addresses WHERE neural_scanned = 1")
-        stats['neural_scanned'] = cursor.fetchone()[0]
-        
         cursor.execute("SELECT COUNT(*) FROM addresses WHERE fail_att != ''")
         stats['attacked'] = cursor.fetchone()[0]
     except sqlite3.OperationalError:
@@ -557,7 +549,6 @@ def get_stats():
         stats['dormant'] = stats.get('dormant', 0)
         stats['vulnerabilities'] = stats.get('vulnerabilities', 0)
         stats['keys_recovered'] = stats.get('keys_recovered', 0)
-        stats['neural_scanned'] = stats.get('neural_scanned', 0)
         stats['attacked'] = stats.get('attacked', 0)
     
     # Calculate estimated probability of success
@@ -577,16 +568,10 @@ def get_stats():
             p = 0.00001 # 1 in 100,000 baseline for identified "vulnerability"
             if 'R-Reuse' in v_type:
                 p = 0.99 if 'Different Z' in str(v_details) else 0.005
-            elif 'Spectral' in v_type:
-                p = 0.05 if v_sev == 'High' else 0.01
-            elif 'Neural' in v_type:
-                p = 0.02 if v_sev == 'High' else 0.005
             elif 'Small R' in v_type:
                 p = 0.01 if v_sev == 'High' else 0.002
             elif 'LSB Bias' in v_type:
                 p = 0.005 if v_sev == 'High' else 0.001
-            elif 'TCG Norm' in v_type:
-                p = 0.0001 
                 
             # Bayesian recalibration: every failed attack reduces p_success
             f_str = fail_atts.get(addr, "")

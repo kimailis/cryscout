@@ -77,7 +77,11 @@ def try_nonce_relation_v6(filename, target_pubkey_hex, limit=100):
     
     print(f"Total pairs to check: {len(pairs)}")
     
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    # Cap CPU usage at 70%
+    num_procs = max(1, int(multiprocessing.cpu_count() * 0.7))
+    print(f"  Using {num_procs} cores (capped at 70%)")
+    
+    with multiprocessing.Pool(processes=num_procs) as pool:
         for result in pool.imap_unordered(check_pair_fast, pairs, chunksize=50):
             if result:
                 i, j, a, b, d, relation = result

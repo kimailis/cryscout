@@ -70,7 +70,9 @@ def scan_small_keys_batch(args):
 def scan_small_keys(target_set, max_key=2**20):
     print(f"Parallel scanning small keys 1 to {max_key}...")
     hash160_targets = build_target_info(target_set)
-    num_procs = multiprocessing.cpu_count()
+    # Cap CPU usage at 70%
+    num_procs = max(1, int(multiprocessing.cpu_count() * 0.7))
+    print(f"  Using {num_procs} cores (capped at 70%)")
     chunk_size = max_key // num_procs + 1
     batches = [(i, min(i + chunk_size, max_key + 1), hash160_targets) 
                for i in range(1, max_key + 1, chunk_size)]
@@ -109,25 +111,6 @@ def scan_android_rng(target_set):
     print("Scanning Android RNG (low entropy) ranges...")
     # Check 1 to 2^32 sequentially or via sampling
     return scan_small_keys(target_set, max_key=2**20) # For now, keep it small
-
-def scan_vortex_harmonic_bruteforce(target_set, max_jumps=10000):
-    print("Running Vortex Harmonic Pruning Brute Force...")
-    hash160_targets = build_target_info(target_set)
-    found = []
-    # Vortex algorithm uses 2^n mod 9 sequence jumps (1, 2, 4, 8, 7, 5) avoiding 3,6,9
-    vortex_cycle = [1, 2, 4, 8, 7, 5]
-    for i in range(max_jumps):
-        cycle_val = vortex_cycle[i % 6]
-        # Jump through keyspace using topological shifts
-        pk_int = (1 << (i % 256)) * cycle_val + (i * 9)
-        if pk_int >= P or pk_int <= 0:
-            pk_int = (pk_int % (P-1)) + 1
-        
-        res = check_privkey(pk_int, hash160_targets)
-        if res:
-            found.append((res[0], res[1], 'Vortex Harmonic Pruning'))
-            
-    return found
 
 def run_weak_key_scan(small_key_max=2**20):
     conn = get_connection()

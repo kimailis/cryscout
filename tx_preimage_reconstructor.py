@@ -149,63 +149,86 @@ def parse_der(sig_hex):
     except:
         return None, None
 
-async def async_extract_sigs_from_txids(address, txids, max_sigs=256):
+from api_client import api
+
+async def async_extract_sigs_from_txids(address, txids, max_sigs=10000):
     full_data = []
-    async with aiohttp.ClientSession() as session:
-        # Fetch TX data in parallel
-        tasks = []
-        for txid in txids[:max_sigs]:
-            tasks.append(session.get(f"https://mempool.space/api/tx/{txid}", timeout=10))
+    # Limit concurrency to avoid hitting rate limits
+    sem = asyncio.Semaphore(5)
+    
+    async def fetch_tx(txid):
+        async with sem:
+            # We use api.get_tx_data but wrap it in run_in_executor since it's sync
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, api.get_tx_data, txid)
+
+    # Process in chunks
+    chunk_size = 50
+    for i in range(0, min(len(txids), max_sigs), chunk_size):
+        chunk = txids[i:i + chunk_size]
+        tasks = [fetch_tx(txid) for txid in chunk]
         
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        for i, resp in enumerate(responses):
-            if isinstance(resp, Exception) or resp.status != 200: continue
-            tx = await resp.json()
-            txid = txids[i]
+        # Use a timeout for the entire chunk to ensure we don't get stuck
+        try:
+            results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=60)
+        except asyncio.TimeoutError:
+            print(f"  [!] Chunk fetch timed out for {address}")
+            continue
             
-            for vin_idx, vin in enumerate(tx.get('vin', [])):
-                if vin.get('prevout', {}).get('scriptpubkey_address') == address:
-                    sig_hex = vin.get('scriptsig')
+        for tx in results:
+            if not tx or not isinstance(tx, dict): continue
+            txid = tx.get('txid', tx.get('hash')) # Handle both formats
+            
+            for vin_idx, vin in enumerate(tx.get('vin', tx.get('inputs', []))):
+                if not vin or not isinstance(vin, dict): continue
+                # Normalize vin data (some APIs return different keys)
+                prevout = vin.get('prevout') or {}
+                prev_out_legacy = vin.get('prev_out') or {}
+                v_addr = prevout.get('scriptpubkey_address') or prev_out_legacy.get('addr')
+                
+                if v_addr == address:
+                    # P2PKH / Legacy: scriptsig
+                    sig_hex = vin.get('scriptsig') or vin.get('script')
+                    # SegWit v0: witness
                     if not sig_hex and vin.get('witness'):
                         sig_hex = vin['witness'][0]
+                    
                     if not sig_hex: continue
                     
                     r_val, s_val = parse_der(sig_hex)
                     if r_val and s_val:
+                        # get_real_z might need the raw tx data again
+                        # It currently expects the format from mempool.space
                         z_val = get_real_z(tx, vin_idx)
                         if z_val:
-                            full_data.append({'r': r_val, 's': s_val, 'z': z_val, 'txid': txid, 'vin': vin_idx})
+                            # Extract pubkey
+                            pubkey = vin.get('scriptsig_asm', '').split(' ')[-1] if not vin.get('witness') else vin['witness'][-1]
+                            full_data.append({
+                                'r': r_val, 's': s_val, 'z': z_val, 
+                                'txid': txid, 'vin': vin_idx,
+                                'pubkey': pubkey
+                            })
                             if len(full_data) >= max_sigs: return full_data
+        
+        # Small yield
+        await asyncio.sleep(0.05)
+            
     return full_data
 
-def extract_sigs_from_txids(address, txids, max_sigs=256):
+def extract_sigs_from_txids(address, txids, max_sigs=10000):
     # Synchronous wrapper for legacy code
     return asyncio.run(async_extract_sigs_from_txids(address, txids, max_sigs))
 
-def extract_sigs_with_real_z(address, max_pages=50, max_sigs=256):
-    # This remains sync but uses async internally or we can make it all async
-    # For now, let's keep it sync for compatibility but it's a bottleneck
-    import requests
-    full_data = []
-    txids = []
-    last_txid = None
-    for _ in range(max_pages):
-        url = f"https://mempool.space/api/address/{address}/txs/chain"
-        if last_txid: url += f"/{last_txid}"
-        r = requests.get(url, timeout=10)
-        if r.status_code != 200: break
-        txs = r.json()
-        if not txs: break
-        for tx in txs:
-            for vin in tx.get('vin', []):
-                if vin.get('prevout', {}).get('scriptpubkey_address') == address:
-                    txids.append(tx['txid'])
-                    break
-            last_txid = tx['txid']
-        if len(txids) >= max_sigs: break
+def extract_sigs_with_real_z(address, max_pages=1000, max_sigs=10000):
+    """
+    Main entry point for signature extraction with reconstructed Z-values.
+    Now uses the multi-source BitcoinAPI for robustness.
+    """
+    # Use the enhanced API to get TXIDs from multiple sources
+    txids = api.get_address_txids(address, max_txs=max_sigs)
     
     if txids:
+        # Re-use our robust async extractor
         return extract_sigs_from_txids(address, txids, max_sigs)
     return []
 
