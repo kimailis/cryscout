@@ -22,6 +22,7 @@ class BaseWorker:
         self.base_sleep = 1.0
         self.current_task = task_name
         self.heartbeat_thread = None
+        self.last_activity = time.time()
         
         # Lower process priority to be a good citizen
         try:
@@ -48,39 +49,56 @@ class BaseWorker:
         ram = psutil.virtual_memory().percent
         return cpu, ram
 
-    def throttle(self):
-        """Dynamic sleep based on system CPU usage to avoid being killed."""
-        cpu = psutil.cpu_percent()
-        if cpu > 70:
-            delay = 10.0
-        elif cpu > 65:
+    def throttle(self, interval=0.1):
+        """Dynamic sleep based on system CPU usage."""
+        cpu = psutil.cpu_percent(interval=None) 
+        if cpu > 95:
             delay = 5.0
-        elif cpu > 60:
+        elif cpu > 90:
             delay = 2.0
-        elif cpu > 50:
+        elif cpu > 85:
             delay = 1.0
         else:
             delay = 0.1
         
-        if delay > 0.5:
-            # self.log(f"Throttling: CPU {cpu}%, sleeping {delay}s")
+        if delay > 0.1:
             time.sleep(delay)
+
+    def check_throttle(self, counter=None, interval=100):
+        """Helper to be called from inside long-running loops."""
+        if counter is not None and counter % interval != 0:
+            return
+            
+        cpu = psutil.cpu_percent(interval=None)
+        if cpu > 80:
+            time.sleep(1.0)
+        elif cpu > 75:
+            time.sleep(0.5)
+        elif cpu > 70:
+            time.sleep(0.2)
+        elif cpu > 65:
+            time.sleep(0.1)
 
     def heartbeat(self, current_task=None):
         if current_task:
             self.current_task = current_task
-        cpu, ram = self.get_stats()
-        update_worker_status(self.worker_id, self.current_task, cpu, ram)
+            self.last_activity = time.time() # Progress made
+            
+        cpu = psutil.cpu_percent(interval=None)
+        ram = psutil.virtual_memory().percent
+        
+        # Only update DB if we haven't been stuck for more than 5 minutes
+        # If we are stuck, the hub will see the heartbeat stop updating.
+        if time.time() - self.last_activity < 300:
+            update_worker_status(self.worker_id, self.current_task, cpu, ram)
 
     def _heartbeat_loop(self):
         """Background loop to update heartbeat every 15 seconds."""
         while self.running:
             try:
                 self.heartbeat()
-            except Exception as e:
-                # Don't let heartbeat errors crash the worker
+            except Exception:
                 pass
-            # Sleep in small increments to respond to self.running change
             for _ in range(15):
                 if not self.running: break
                 time.sleep(1)
@@ -94,17 +112,14 @@ class BaseWorker:
         
         try:
             while self.running:
-                # We still call throttle and process_loop in the main thread
+                self.last_activity = time.time() # Main loop is alive
                 self.throttle()
-                # We update the 'main' status before starting a loop
                 self.process_loop()
                 time.sleep(self.base_sleep)
         except KeyboardInterrupt:
             self.log("Stopping...")
         except Exception as e:
             self.log(f"Worker Error: {str(e)}")
-            # No re-raise here to avoid hub restart loops if it's a transient error, 
-            # but usually we want to know.
             raise
         finally:
             self.running = False

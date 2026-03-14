@@ -103,8 +103,11 @@ class BitcoinAPI:
             if not txs:
                 break
             for tx in txs:
+                if not tx or not isinstance(tx, dict): continue
                 for vin in tx.get('vin', []):
-                    if vin.get('prevout', {}).get('scriptpubkey_address') == address:
+                    if not vin or not isinstance(vin, dict): continue
+                    prevout = vin.get('prevout') or {}
+                    if prevout.get('scriptpubkey_address') == address:
                         txids.append(tx['txid'])
                         break
                 last_txid = tx['txid']
@@ -129,8 +132,11 @@ class BitcoinAPI:
             if not txs:
                 break
             for tx in txs:
+                if not tx or not isinstance(tx, dict): continue
                 for vin in tx.get('vin', []):
-                    if vin.get('prevout', {}).get('scriptpubkey_address') == address:
+                    if not vin or not isinstance(vin, dict): continue
+                    prevout = vin.get('prevout') or {}
+                    if prevout.get('scriptpubkey_address') == address:
                         txids.append(tx['txid'])
                         break
                 last_txid = tx['txid']
@@ -265,7 +271,7 @@ class AsyncBitcoinAPI:
         ]
         self.headers = {'User-Agent': random.choice(USER_AGENTS)}
 
-    async def get_address_txids(self, address, max_txs=100):
+    async def get_address_txids(self, address, max_txs=10000):
         async with aiohttp.ClientSession(headers=self.headers) as session:
             # Try mempool
             try:
@@ -274,6 +280,7 @@ class AsyncBitcoinAPI:
                         txs = await resp.json()
                         txids = []
                         for tx in txs:
+                            if not tx or not isinstance(tx, dict): continue
                             for vin in tx.get('vin', []):
                                 if vin.get('prevout', {}).get('scriptpubkey_address') == address:
                                     txids.append(tx['txid'])

@@ -44,11 +44,11 @@ class AsyncFetcherWorker(BaseWorker):
             try:
                 # 1. Get txids (sync for now as it's one call)
                 from api_client import api
-                txids = api.get_address_txids(addr, max_txs=100)
+                txids = api.get_address_txids(addr, max_txs=10000)
                 
                 if txids:
                     # 2. Extract sigs asynchronously (this is the big gain)
-                    sigs = await async_extract_sigs_from_txids(addr, txids, max_sigs=256)
+                    sigs = await async_extract_sigs_from_txids(addr, txids, max_sigs=10000)
                     if sigs:
                         await self.loop.run_in_executor(None, save_signatures, addr, sigs)
                         self.log(f"  Got {len(sigs)} sigs for {addr}")

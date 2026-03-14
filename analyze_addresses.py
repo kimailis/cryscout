@@ -130,18 +130,20 @@ def analyze_addresses():
                 n_tx = bc_data.get('n_tx', 0)
                 first_date = "Unknown"
                 if n_tx > 0:
-                    if n_tx <= 50 and 'tx' in bc_data and bc_data['tx']:
-                        first_tx = bc_data['tx'][-1]
+                    tx_list = bc_data.get('tx')
+                    if n_tx <= 50 and tx_list:
+                        first_tx = tx_list[-1]
                         first_date = time.strftime('%Y-%m-%d', time.gmtime(first_tx['time'])) if 'time' in first_tx else "Unknown"
                     elif n_tx > 50:
                         bc_data_first = get_blockchain_info_data(address, offset=n_tx-1)
-                        if bc_data_first and 'tx' in bc_data_first and bc_data_first['tx']:
+                        if bc_data_first and bc_data_first.get('tx'):
                             first_tx = bc_data_first['tx'][0]
                             first_date = time.strftime('%Y-%m-%d', time.gmtime(first_tx['time'])) if 'time' in first_tx else "Unknown"
-                
+
+                tx_list = bc_data.get('tx')
                 last_tx_date = "Unknown"
-                if 'tx' in bc_data and bc_data['tx']:
-                     last_tx_date = time.strftime('%Y-%m-%d', time.gmtime(bc_data['tx'][0]['time'])) if 'time' in bc_data['tx'][0] else "Unknown"
+                if tx_list:
+                     last_tx_date = time.strftime('%Y-%m-%d', time.gmtime(tx_list[0]['time'])) if 'time' in tx_list[0] else "Unknown"
 
                 result = {
                     "balance": bc_data.get('final_balance', 0) / 100_000_000,

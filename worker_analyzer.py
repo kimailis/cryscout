@@ -24,6 +24,8 @@ class AnalyzerWorker(BaseWorker):
         
         try:
             found = False
+            self.check_throttle()
+            
             # Check R-reuse (fast)
             if check_r_reuse_strict(addr):
                 self.log(f"!!! SUCCESS: R-reuse found for {addr}")
@@ -31,6 +33,9 @@ class AnalyzerWorker(BaseWorker):
             else:
                 from db_manager import update_fail_att
                 update_fail_att(addr, 2)            
+            
+            self.check_throttle()
+            
             # Lattice attack
             if not found and run_lattice_attacks_enhanced(addr):
                 self.log(f"!!! SUCCESS: Lattice key found for {addr}")
@@ -38,6 +43,9 @@ class AnalyzerWorker(BaseWorker):
             elif not found:
                 from db_manager import update_fail_att
                 update_fail_att(addr, 2)            
+            
+            self.check_throttle()
+            
             # Algebraic attacks
             if not found and run_algebraic_attacks(addr):
                 self.log(f"!!! SUCCESS: Algebraic key found for {addr}")
@@ -45,6 +53,7 @@ class AnalyzerWorker(BaseWorker):
             elif not found:
                 from db_manager import update_fail_att
                 update_fail_att(addr, 2)            
+            
             # Done with this address
             mark_stage_done(addr, 'analyzing', self.worker_id)
             self.log(f"Finished analysis for {addr}")

@@ -52,7 +52,6 @@ def get_stats():
         "Dormant": db_stats['dormant'],
         "Recovered": db_stats['keys_recovered'],
         "Workers": active_workers,
-        "NeuralAnalyzed": db_stats.get('neural_scanned', 0),
         "Attacked": db_stats.get('attacked', 0),
         "SuccessProb": db_stats.get('success_prob', 0.0),
         "MaxIndividualProb": db_stats.get('max_individual_prob', 0.0)
@@ -83,33 +82,6 @@ def get_potential_targets():
     except Exception as e:
         targets.append({"Address": "Error", "Balance": "N/A", "Reason": str(e)})
     return targets
-
-def get_neural_findings():
-    findings = []
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        query = '''
-        SELECT address, type, details, severity 
-        FROM vulnerabilities 
-        WHERE type LIKE 'Neural%' OR type LIKE 'Spectral%' 
-        ORDER BY found_at DESC 
-        LIMIT 50
-        '''
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        for row in rows:
-            findings.append({
-                "Address": row[0],
-                "Type": row[1],
-                "Details": row[2] if row[2] else "N/A",
-                "Severity": row[3]
-            })
-        conn.close()
-    except Exception as e:
-        # findings.append({"Address": "Error", "Type": "N/A", "Details": str(e), "Severity": "N/A"})
-        pass
-    return findings
 
 def get_recovered_keys():
     keys = []
@@ -199,7 +171,7 @@ def stop_all_services():
             except: pass
     except:
         # Fallback to shell if psutil fails
-        subprocess.run("pkill -9 -f 'cryshub.py|worker_|bitcoin_miner.py'", shell=True)
+        subprocess.run("pkill -9 -f 'cryshub.py|worker_|bitcoin_miner.py'", shell=True, timeout=60)
 
 def draw_dashboard(stdscr):
     curses.curs_set(0)
@@ -256,28 +228,27 @@ def draw_dashboard(stdscr):
             stdscr.addstr(5, 2, "Progress Overview:", curses.A_UNDERLINE)
             stdscr.addstr(6, 4, f"Total Addresses Tracked: {stats['Total']}")
             stdscr.addstr(7, 4, f"Addresses Analyzed:      {stats['Analyzed']}")
-            stdscr.addstr(8, 4, f"Neural Scanning:         {stats['NeuralAnalyzed']} / {stats['Total']}")
-            stdscr.addstr(9, 4, f"Active Attack Coverage:  {stats['Attacked']} / {stats['Total']}")
-            stdscr.addstr(10, 4, f"Keys Recovered:          {stats['Recovered']}", curses.color_pair(1) if stats['Recovered']>0 else curses.A_NORMAL)
-            stdscr.addstr(11, 4, f"Active Workers:          {stats['Workers']}", curses.color_pair(4) if stats['Workers']>0 else curses.A_NORMAL)
+            stdscr.addstr(8, 4, f"Active Attack Coverage:  {stats['Attacked']} / {stats['Total']}")
+            stdscr.addstr(9, 4, f"Keys Recovered:          {stats['Recovered']}", curses.color_pair(1) if stats['Recovered']>0 else curses.A_NORMAL)
+            stdscr.addstr(10, 4, f"Active Workers:          {stats['Workers']}", curses.color_pair(4) if stats['Workers']>0 else curses.A_NORMAL)
             
             percent = (stats['Analyzed'] / stats['Total']) * 100 if stats['Total'] > 0 else 0
             bar_len = min(width - 20, 50)
             filled = int((percent / 100) * bar_len)
             bar = "[" + "=" * filled + " " * (bar_len - filled) + "]"
-            stdscr.addstr(12, 4, f"Progress: {bar} {percent:.1f}%")
+            stdscr.addstr(11, 4, f"Progress: {bar} {percent:.1f}%")
             
             # LIVE WORKER FLEET SECTION
             worker_list = info.get('workers_detailed', [])
-            stdscr.addstr(13, 2, "Live Worker Fleet:", curses.A_UNDERLINE | curses.color_pair(4))
+            stdscr.addstr(12, 2, "Live Worker Fleet:", curses.A_UNDERLINE | curses.color_pair(4))
             if not worker_list:
-                stdscr.addstr(14, 4, "No active workers detected.")
+                stdscr.addstr(13, 4, "No active workers detected.")
             else:
-                stdscr.addstr(14, 4, f"{'Worker ID':<20} {'Current Task / Activity':<40} {'CPU':<6} {'RAM'}")
-                stdscr.addstr(15, 4, "-" * (width - 10))
+                stdscr.addstr(13, 4, f"{'Worker ID':<20} {'Current Task / Activity':<40} {'CPU':<6} {'RAM'}")
+                stdscr.addstr(14, 4, "-" * (width - 10))
                 for i, w in enumerate(worker_list):
-                    if i + 16 >= height - 12: break
-                    y = 16 + i
+                    if i + 15 >= height - 12: break
+                    y = 15 + i
                     wid = w.get('id', 'N/A')
                     task = w.get('task', 'N/A')
                     cpu = f"{w.get('cpu', 0):.1f}%"
@@ -287,40 +258,7 @@ def draw_dashboard(stdscr):
                     style = curses.A_BOLD if "STRIKING" in task.upper() or "FLAGGED" in task.upper() or "EVOLVING" in task.upper() else curses.A_NORMAL
                     stdscr.addstr(y, 4, f"{wid[:19]:<20} {task[:39]:<40} {cpu:<6} {ram}", style)
 
-            controls = "[S] Start | [T] Stop | [R] Restart | [A] Re-Analyze | [P] Potential | [N] Neural | [K] Keys | [Q] Quit"
-            stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)
-
-        elif mode == "NEURAL":
-            stdscr.addstr(2, 2, "Neural Network & Spectral Analysis Findings:", curses.A_UNDERLINE | curses.color_pair(4))
-            
-            # Neural Training Coherence (estimated from worker status)
-            coherence = "Stable"
-            worker_list = info.get('workers_detailed', [])
-            for w in worker_list:
-                if "evolving" in w.get('task', '').lower():
-                    coherence = "Evolving / Learning"
-                    break
-            
-            stdscr.addstr(4, 4, f"Training Coherence: {coherence}", curses.A_BOLD | curses.color_pair(1))
-            stdscr.addstr(6, 4, f"{'Address':<35} {'Type':<25} {'P(Vuln)':<10} {'Severity'}")
-            stdscr.addstr(7, 4, "-" * (width - 8))
-            
-            findings = get_neural_findings()
-            if not findings:
-                stdscr.addstr(8, 4, "No neural anomalies detected yet.")
-            else:
-                for i, f in enumerate(findings):
-                    if i + 8 >= height - 12: break
-                    y = 8 + i
-                    color = curses.color_pair(1) if f['Severity'] == 'High' else curses.A_NORMAL
-                    prob = "N/A"
-                    if "P=" in f['Details']: prob = f['Details'].split("P=")[1][:6]
-                    elif "prob=" in f['Details'].lower(): prob = f['Details'].lower().split("prob=")[1][:6]
-                    elif "vulnerable)=" in f['Details'].lower(): prob = f['Details'].lower().split("vulnerable)=")[1][:6]
-
-                    stdscr.addstr(y, 4, f"{f['Address'][:34]:<35} {f['Type'][:24]:<25} {prob:<10} {f['Severity']}", color)
-
-            controls = "[B] Back to Main | [Q] Quit"
+            controls = "[S] Start | [T] Stop | [R] Restart | [A] Re-Analyze | [P] Potential | [K] Keys | [Q] Quit"
             stdscr.addstr(height - 2, max(0, (width - len(controls)) // 2), controls, curses.A_BOLD)
 
         elif mode == "POTENTIAL":

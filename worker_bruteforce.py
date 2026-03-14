@@ -37,13 +37,9 @@ class BruteForceWorker(BaseWorker):
             if stage == 'bruteforce':
                 # Weak Key & Pattern Scan
                 self.log("Running weak key and pattern scan...")
-                from weak_key_scanner import scan_pattern_keys, scan_android_rng, scan_small_keys, scan_vortex_harmonic_bruteforce
+                from weak_key_scanner import scan_pattern_keys, scan_android_rng, scan_small_keys
                 found.extend(scan_pattern_keys(target_set))
                 found.extend(scan_android_rng(target_set))
-                
-                # Vortex Harmonic Pruning
-                self.log("Running Vortex Harmonic Pruning scan...")
-                found.extend(scan_vortex_harmonic_bruteforce(target_set))
                 
                 # Seed Guesser (BIP39)
                 self.log("Running seed guesser (BIP39 patterns)...")

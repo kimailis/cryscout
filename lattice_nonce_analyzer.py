@@ -119,7 +119,13 @@ def lll_reduction(basis):
         update_orthogonalization(i)
 
     k = 1
+    iteration = 0
+    start_time = time.time()
     while k < n:
+        iteration += 1
+        if time.time() - start_time > 60:
+            print("LLL reduction timeout (60s)")
+            break
         for j in range(k-1, -1, -1):
             if abs(mu[k][j]) > 0.5:
                 q = int(round(mu[k][j]))
@@ -135,8 +141,6 @@ def lll_reduction(basis):
             update_orthogonalization(k)
             k = max(k-1, 1)
     return basis
-
-from vortex_math_analyzer import analyze_vortex_periodicity
 
 def solve_hnp(sigs_data, bias_bits, address=None):
     # Limit number of signatures to avoid slow LLL reduction
@@ -162,20 +166,9 @@ def solve_hnp(sigs_data, bias_bits, address=None):
     for i in range(n): matrix[n+1][i] = u_values[i]
     matrix[n+1][n+1] = B
     
-    print("Applying Vortex Harmonic Pruning (3-6-9 periodicity) to lattice...")
     reduced = lll_reduction(matrix)
     
-    # Sort reduced rows by their "Vortex" fitness based on 3-6-9 exclusion in the short vector components
-    def vortex_score(row):
-        score = 0.0
-        for i in range(n):
-            hex_val = hex(abs(int(row[i])))[2:]
-            _, purity = analyze_vortex_periodicity(hex_val)
-            score += purity
-        return score
-    
-    reduced.sort(key=vortex_score, reverse=True)
-    
+    # Reduced lattice check
     for row in reduced:
         potential_d = abs(row[n]) 
         if potential_d == 0 or potential_d >= P: continue
