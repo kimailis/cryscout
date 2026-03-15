@@ -145,7 +145,13 @@ def generate_full_wordlist():
         "i think therefore i am",
         "chancellor on brink of second bailout for banks",
         "bitcoin a peer to peer electronic cash system",
-        "not your keys not your coins"
+        "not your keys not your coins",
+        "Satoshi Nakamoto",
+        "satoshi nakamoto",
+        "MtGox",
+        "1FeexV6bAHb8ybZjqQMjJrcCrHGW9sb6uF", # Sometimes people use the address as the password
+        "1LdRcdxfbSnmCYYNdeYpUnztiYzVfBEQeC",
+        "1AC4fMwgY8j9onSbXEWeH6Zan8QGMSdmtA"
     ])
     
     # Numeric sequences
@@ -163,7 +169,13 @@ def check_phrase_batch(args):
 
 def run_massive_brainwallet_scan(target_set=None):
     if target_set is None:
-        target_set = build_address_set()
+        import pandas as pd
+        try:
+            df = pd.read_csv("dormant_addresses.csv")
+            target_set = set(df['Address'].tolist())
+            print(f"Loaded {len(target_set)} targets from dormant_addresses.csv")
+        except:
+            target_set = build_address_set()
     
     print(f"Starting optimized brainwallet scan for {len(target_set)} targets...")
     hash160_targets = build_target_info(target_set)

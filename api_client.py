@@ -156,18 +156,24 @@ class BitcoinAPI:
             all_txids = addr_data.get('transactions', [])
             return all_txids[:max_txs]
         
-        # Fallback: blockchain.info
+        # Fallback: blockchain.info (supports offset up to 1000+)
         src = self.sources[2]
-        resp = self._get(src, f"/rawaddr/{address}", params={'limit': 500})
-        if resp and resp.status_code == 200:
-            data = resp.json()
-            for tx in data.get('txs', []):
-                for inp in tx.get('inputs', []):
-                    prev_out = inp.get('prev_out', {})
-                    if prev_out.get('addr') == address:
-                        txids.append(tx['hash'])
-                        break
-            return list(dict.fromkeys(txids))
+        for offset in range(0, min(max_txs, 2000), 100):
+            resp = self._get(src, f"/rawaddr/{address}", params={'limit': 100, 'offset': offset})
+            if resp and resp.status_code == 200:
+                data = resp.json()
+                txs = data.get('txs', [])
+                if not txs: break
+                for tx in txs:
+                    for inp in tx.get('inputs', []):
+                        prev_out = inp.get('prev_out', {})
+                        if prev_out.get('addr') == address:
+                            txids.append(tx['hash'])
+                            break
+                if len(txids) >= max_txs: break
+            else:
+                break
+        return list(dict.fromkeys(txids))
         
         # Last resort: Bitcoin RPC
         if self.rpc_available:
