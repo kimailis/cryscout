@@ -36,7 +36,7 @@ class AnalyzerWorker(BaseWorker):
             
             self.check_throttle()
             
-            # Lattice attack
+            # 2. Lattice attack
             if not found and run_lattice_attacks_enhanced(addr):
                 self.log(f"!!! SUCCESS: Lattice key found for {addr}")
                 found = True
@@ -46,7 +46,26 @@ class AnalyzerWorker(BaseWorker):
             
             self.check_throttle()
             
-            # Algebraic attacks
+            # 2.5 Deep LSB Bias Detection (NEW)
+            if not found:
+                try:
+                    from check_lsb_system import check_lsb_system
+                    from db_manager import get_signatures, add_finding
+                    sigs = get_signatures(addr)
+                    if len(sigs) >= 5:
+                        self.log(f"Running deep LSB bias detection on {addr}...")
+                        bias_results = check_lsb_system(sigs, max_bits=20)
+                        if bias_results:
+                            # Use the best result (highest bits or best ratio)
+                            best = max(bias_results, key=lambda x: x['bits'])
+                            self.log(f"!!! DEEP BIAS FOUND for {addr}: {best['bits']} bits, d_mod={best['d_mod']}")
+                            add_finding(addr, 'Deep LSB Bias', details=best, severity='High')
+                except Exception as e:
+                    self.log(f"Deep bias scan error for {addr}: {e}")
+
+            self.check_throttle()
+            
+            # 3. Algebraic attacks
             if not found and run_algebraic_attacks(addr):
                 self.log(f"!!! SUCCESS: Algebraic key found for {addr}")
                 found = True

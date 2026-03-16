@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "cryshub_rs",
+    "crypdash_rs",
+    "nonce_relation_rs",
+    "address_analyzer_rs",
+    "bias_detector_rs",
+    "lattice_attack_rs",
+    "cryscout_worker_rs",
+    "bleichenbacher_fourier"
+]
+resolver = "2"

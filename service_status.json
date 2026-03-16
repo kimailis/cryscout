@@ -1,1 +1,54 @@
-{"running": true, "current_task": "Hub active: 1 workers", "cpu_usage": 100.0, "ram_usage": 43.7, "last_heartbeat": 1773496622.0922287, "pid": 64035, "logs": ["[13:54:37] [HUB] [analyzer] Checking for LCG Nonce Relations in 49 sigs for 12m9dz42JrwCwLhxuzVMzNs9BXvwxTp3B1...", "[13:54:37] [HUB] [analyzer] [13:54:37] [analyzer_64039] Finished analysis for 12m9dz42JrwCwLhxuzVMzNs9BXvwxTp3B1", "[13:54:38] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:54:44] [HUB] [analyzer] [13:54:44] [analyzer_64039] Starting analysis for 1Bx46EnVyvXMeYYSTJ1MUrrskd4QAZQWMK...", "[13:54:53] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:54:57] [HUB] [analyzer] Checking for Nonce Deltas in 16 sigs for 1Bx46EnVyvXMeYYSTJ1MUrrskd4QAZQWMK...", "[13:54:57] [HUB] [analyzer] Checking for Multiplicative Nonce Relations (k_i = c * k_j) in 16 sigs...", "[13:54:57] [HUB] [analyzer] Checking for LCG Nonce Relations in 16 sigs for 1Bx46EnVyvXMeYYSTJ1MUrrskd4QAZQWMK...", "[13:54:57] [HUB] [analyzer] [13:54:57] [analyzer_64039] Finished analysis for 1Bx46EnVyvXMeYYSTJ1MUrrskd4QAZQWMK", "[13:55:04] [HUB] [analyzer] [13:55:04] [analyzer_64039] Starting analysis for 1JU8KXtbAVzV7rQqZodqcczrbWLYEhrTkE...", "[13:55:07] [HUB] [analyzer] [13:55:07] [analyzer_64039] Finished analysis for 1JU8KXtbAVzV7rQqZodqcczrbWLYEhrTkE", "[13:55:08] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:55:14] [HUB] [analyzer] [13:55:14] [analyzer_64039] Starting analysis for 1LbpBu1oph1VG1hEZpB2CbBq6oF5AuptF1...", "[13:55:23] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:55:38] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:55:53] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:56:08] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:56:23] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:56:38] [HUB] CPU HIGH (100.0%). Pausing worker expansion.", "[13:56:54] [HUB] CPU HIGH (100.0%). Pausing worker expansion."], "worker_count": 1, "workers_detailed": [{"id": "analyzer_64039", "task": "Analyzing: 1LbpBu1oph1VG1h...", "cpu": 100.0, "ram": 43.7, "last_seen": "2026-03-14 13:56:47"}]}
+{
+  "running": true,
+  "current_task": "Hub active: 3 workers",
+  "cpu_usage": 9.0,
+  "ram_usage": 27.635518795320714,
+  "last_heartbeat": 1773667061.9392047,
+  "pid": 109402,
+  "logs": [
+    "[13:16:14] [HUB] [scanner] [2026-03-16 13:16:14] [Scanner-109407] Checking dormancy for 1ALXLVNj7yKRU2Yki3K3yQGB5TBPof7jyo...",
+    "[13:16:15] [HUB] [scanner] [2026-03-16 13:16:15] [Scanner-109407] Checking dormancy for 1LwBdypLh3WPawK1WUqGZXgs4V8neHHqb7...",
+    "[13:16:15] [HUB] [scanner] [2026-03-16 13:16:15] [Scanner-109407] Checking dormancy for 1GMFSWQQQhCQyRNQcac9tDKcvqYCuripVs...",
+    "[13:16:16] [HUB] [scanner] [2026-03-16 13:16:16] [Scanner-109407] Checking dormancy for 14mPMrRm6TdjqHZhd7aBUbuWt5MYWReukR...",
+    "[13:16:43] [HUB] [striker] [2026-03-16 13:16:43] [Striker-109409] Executing high-performance Rust strikes on priority targets...",
+    "[13:16:44] [HUB] [scanner] [2026-03-16 13:16:44] [Scanner-109407] Scanning for lost targets [100 - 4000 BTC, dormant 5y+]...",
+    "[13:16:44] [HUB] [scanner] [2026-03-16 13:16:44] [Scanner-109407] Checking dormancy for 1VeMPNgEtQGurwjW2WsYXQaw4boAX5k6S...",
+    "[13:16:44] [HUB] [analyzer] [2026-03-16 13:16:44] [Analyzer-109408] Extracting signatures for prioritized lost assets...",
+    "[13:16:44] [HUB] [scanner] [2026-03-16 13:16:44] [Scanner-109407] Checking dormancy for 1ALXLVNj7yKRU2Yki3K3yQGB5TBPof7jyo...",
+    "[13:16:45] [HUB] [scanner] [2026-03-16 13:16:45] [Scanner-109407] Checking dormancy for 1LwBdypLh3WPawK1WUqGZXgs4V8neHHqb7...",
+    "[13:16:45] [HUB] [scanner] [2026-03-16 13:16:45] [Scanner-109407] Checking dormancy for 1GMFSWQQQhCQyRNQcac9tDKcvqYCuripVs...",
+    "[13:16:46] [HUB] [scanner] [2026-03-16 13:16:46] [Scanner-109407] Checking dormancy for 14mPMrRm6TdjqHZhd7aBUbuWt5MYWReukR...",
+    "[13:17:13] [HUB] [striker] [2026-03-16 13:17:13] [Striker-109409] Executing high-performance Rust strikes on priority targets...",
+    "[13:17:14] [HUB] [scanner] [2026-03-16 13:17:14] [Scanner-109407] Scanning for lost targets [100 - 4000 BTC, dormant 5y+]...",
+    "[13:17:14] [HUB] [scanner] [2026-03-16 13:17:14] [Scanner-109407] Checking dormancy for 1VeMPNgEtQGurwjW2WsYXQaw4boAX5k6S...",
+    "[13:17:14] [HUB] [analyzer] [2026-03-16 13:17:14] [Analyzer-109408] Extracting signatures for prioritized lost assets...",
+    "[13:17:14] [HUB] [scanner] [2026-03-16 13:17:14] [Scanner-109407] Checking dormancy for 1ALXLVNj7yKRU2Yki3K3yQGB5TBPof7jyo...",
+    "[13:17:15] [HUB] [scanner] [2026-03-16 13:17:15] [Scanner-109407] Checking dormancy for 1LwBdypLh3WPawK1WUqGZXgs4V8neHHqb7...",
+    "[13:17:15] [HUB] [scanner] [2026-03-16 13:17:15] [Scanner-109407] Checking dormancy for 1GMFSWQQQhCQyRNQcac9tDKcvqYCuripVs...",
+    "[13:17:16] [HUB] [scanner] [2026-03-16 13:17:16] [Scanner-109407] Checking dormancy for 14mPMrRm6TdjqHZhd7aBUbuWt5MYWReukR..."
+  ],
+  "worker_count": 3,
+  "workers_detailed": [
+    {
+      "id": "Analyzer-109408",
+      "task": "Analyzer",
+      "cpu": 8.665886878967285,
+      "ram": 2197.9609375,
+      "last_seen": "2026-03-16 13:17:14"
+    },
+    {
+      "id": "Scanner-109407",
+      "task": "Scanner",
+      "cpu": 8.693475723266602,
+      "ram": 2197.9453125,
+      "last_seen": "2026-03-16 13:17:16"
+    },
+    {
+      "id": "Striker-109409",
+      "task": "Striker",
+      "cpu": 8.665886878967285,
+      "ram": 2197.9609375,
+      "last_seen": "2026-03-16 13:17:13"
+    }
+  ]
+}

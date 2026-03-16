@@ -2,9 +2,6 @@ dormant_btc.html
 __pycache__/
 *.pyc
 .env
-*.db
-*.db-shm
-*.db-wal
 *.log
 *.out
 *.pid
@@ -16,6 +13,5 @@ hub_orchestra.log
 scanner.log
 analyze.log
 miner.log
-*.db
-*.db-shm
-*.db-wal
+target/
+node_modules/
