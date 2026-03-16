@@ -19,7 +19,7 @@ from datetime import datetime
 # CONFIGURATION
 STATUS_FILE = 'service_status.json'
 SIGNAL_FILE = 'service_signal.txt'
-WORKER_TYPES = ["fetcher", "scanner", "analyzer", "striker", "bruteforce"]
+WORKER_TYPES = ["fetcher", "scanner", "analyzer", "striker", "bruteforce", "neural"]
 MAX_CPU_PERCENT = 98.0
 MAX_RAM_PERCENT = 95.0
 

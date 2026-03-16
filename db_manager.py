@@ -184,6 +184,12 @@ def init_db():
     except sqlite3.OperationalError:
         pass # Column already exists
 
+    try:
+        cursor.execute("ALTER TABLE addresses ADD COLUMN neural_scanned BOOLEAN DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass # Column already exists
+
     conn.close()
 
 def create_cluster(fingerprint_hash, library_name=None, features=None):
@@ -254,6 +260,9 @@ def claim_address(worker_id, stage=None, limit=1, extra_filter=None):
         # Analyze if not yet analyzed, or re-analyze after a day (with higher priority for High severity)
         # BUG FIX: Removed infinite re-analysis of High severity vulnerabilities
         stage_filter = "(a.analyzed = 0 OR a.last_updated < datetime('now', '-24 hours')) AND a.sigs_fetched = 1"
+    elif stage == 'neural':
+        # Neural network scan: Focus on addresses with enough signatures
+        stage_filter = "a.neural_scanned = 0 AND a.sigs_fetched = 1 AND a.address IN (SELECT address FROM signatures GROUP BY address HAVING COUNT(*) >= 4)"
     elif stage == 'forensic':
         # Forensic scans: Target P2PK and early Legacy addresses
         # BUG FIX: Added forensic_scanned = 0 filter to prevent infinite loops
@@ -315,6 +324,7 @@ def mark_stages_done(address, stages, worker_id):
         if stage == 'fetching': column = "sigs_fetched"
         elif stage == 'scanning': column = "sigs_scanned"
         elif stage == 'analyzing': column = "analyzed"
+        elif stage == 'neural': column = "neural_scanned"
         elif stage == 'brainwallet': column = "brainwallet_scanned"
         elif stage == 'forensic': column = "forensic_scanned"
         updates.append(f"{column} = 1")
@@ -361,6 +371,8 @@ def mark_stage_done(address, stage, worker_id):
             column = "sigs_scanned"
         elif stage == 'analyzing':
             column = "analyzed"
+        elif stage == 'neural':
+            column = "neural_scanned"
         elif stage == 'brainwallet':
             column = "brainwallet_scanned"
         elif stage == 'forensic':
