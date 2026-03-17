@@ -7,6 +7,7 @@ members = [
     "bias_detector_rs",
     "lattice_attack_rs",
     "cryscout_worker_rs",
-    "bleichenbacher_fourier"
-]
+    "bleichenbacher_fourier",
+    "wallet_scout_rs"
+, "kangaroo_rs"]
 resolver = "2"

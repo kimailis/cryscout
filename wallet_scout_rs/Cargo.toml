@@ -1,16 +1,16 @@
 [package]
-name = "crypdash_rs"
+name = "wallet_scout_rs"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ratatui = "0.26"
-crossterm = "0.27"
+tiny-bip39 = "1.0"
+bitcoin = { version = "0.30", features = ["rand", "secp-recovery"] }
+rayon = "1.8"
 rusqlite = { version = "0.29", features = ["bundled"] }
+anyhow = "1.0"
+rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0"
 chrono = "0.4"
-sysinfo = "0.30"
-regex = "1.10"
-libc = "0.2"
+hex = "0.4"

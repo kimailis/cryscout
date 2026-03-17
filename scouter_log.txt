@@ -1,0 +1,3 @@
+Loaded 4049 target addresses.
+[Scouter] Checked: 2189 | Speed: 1094.50 keys/s | Uptime: 2s
+[Scouter] Checked: 4367 | Speed: 1089.00 keys/s | Uptime: 4s
