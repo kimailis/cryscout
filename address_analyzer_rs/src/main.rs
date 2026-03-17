@@ -17,10 +17,19 @@ const USER_AGENTS: &[&str] = &[
 ];
 
 #[derive(Debug, Deserialize)]
+struct MempoolTxStatus {
+    confirmed: bool,
+    block_height: Option<u32>,
+    block_hash: Option<String>,
+    block_time: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct MempoolTx {
     txid: String,
     vin: Vec<MempoolVin>,
     vout: Vec<MempoolVout>,
+    status: MempoolTxStatus,
     version: u32,
     locktime: u32,
 }
@@ -52,6 +61,7 @@ struct ExtractedSig {
     txid: String,
     vin: u32,
     pubkey: String,
+    timestamp: Option<u64>,
 }
 
 fn double_sha256(data: &[u8]) -> Vec<u8> {
@@ -254,6 +264,7 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
                             txid: tx.txid.clone(),
                             vin: vin_idx as u32,
                             pubkey,
+                            timestamp: tx.status.block_time,
                         });
                     }
                 }
@@ -308,8 +319,8 @@ async fn main() -> Result<()> {
             let conn = Connection::open(DB_FILE)?;
             for sig in sigs {
                 let _ = conn.execute(
-                    "INSERT OR IGNORE INTO signatures (address, r, s, z, txid, vin, pubkey_hex) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![addr, sig.r, sig.s, sig.z, sig.txid, sig.vin, sig.pubkey],
+                    "INSERT OR IGNORE INTO signatures (address, r, s, z, txid, vin, pubkey_hex, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![addr, sig.r, sig.s, sig.z, sig.txid, sig.vin, sig.pubkey, sig.timestamp],
                 );
             }
         }

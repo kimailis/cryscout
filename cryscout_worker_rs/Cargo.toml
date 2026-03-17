@@ -24,9 +24,14 @@ num-integer = "0.1"
 num-traits = "0.2"
 num-complex = "0.4"
 rustfft = "6.1"
-nalgebra = "0.32"
+nalgebra = "0.31" # Downgraded
 float-ord = "0.3"
 async-trait = "0.1"
 futures = "0.3"
 rand = "0.8"
 libc = "0.2"
+
+# Explicitly add ort dependencies to constrain versions
+ort = "=2.0.0-rc.1"
+ort-sys = "=2.0.0-rc.1"
+ndarray = "0.15"

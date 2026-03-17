@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -18,7 +18,7 @@ const STATUS_FILE: &str = "service_status.json";
 const SIGNAL_FILE: &str = "service_signal.txt";
 const DB_FILE: &str = "cryscout.db";
 
-const WORKER_TYPES: &[&str] = &["scanner", "analyzer", "striker"];
+const WORKER_TYPES: &[&str] = &["scanner", "analyzer", "striker", "scouter"];
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct WorkerDetail {
@@ -36,6 +36,7 @@ struct HubStatus {
     cpu_usage: f64,
     ram_usage: f64,
     last_heartbeat: f64,
+    last_update: String,
     pid: u32,
     logs: Vec<String>,
     worker_count: usize,
@@ -59,7 +60,7 @@ impl HubState {
     fn new() -> Self {
         Self {
             workers: HashMap::new(),
-            running: true,
+            running: false,
             log_buffer: Vec::new(),
             system: System::new_all(),
         }
@@ -70,34 +71,36 @@ impl HubState {
         let formatted = format!("[{}] [HUB] {}", now, msg);
         println!("{}", formatted);
         self.log_buffer.push(formatted);
-        if self.log_buffer.len() > 20 {
+        if self.log_buffer.len() > 500 {
             self.log_buffer.remove(0);
         }
     }
 }
 
 async fn get_worker_details() -> Vec<WorkerDetail> {
-    let mut details = Vec::new();
-    if let Ok(conn) = Connection::open(DB_FILE) {
-        let query = "SELECT worker_id, task, cpu_usage, ram_usage, last_heartbeat 
-                     FROM worker_status 
-                     WHERE last_heartbeat > datetime('now', '-120 seconds')
-                     ORDER BY worker_id ASC";
-        if let Ok(mut stmt) = conn.prepare(query) {
-            if let Ok(iter) = stmt.query_map([], |row| {
-                Ok(WorkerDetail {
-                    id: row.get(0)?,
-                    task: row.get(1)?,
-                    cpu: row.get(2)?,
-                    ram: row.get(3)?,
-                    last_seen: row.get(4)?,
-                })
-            }) {
-                details.extend(iter.flatten());
+    tokio::task::spawn_blocking(|| {
+        let mut details = Vec::new();
+        if let Ok(conn) = Connection::open(DB_FILE) {
+            let query = "SELECT worker_id, task, cpu_usage, ram_usage, last_heartbeat 
+                         FROM worker_status 
+                         WHERE last_heartbeat > datetime('now', '-120 seconds')
+                         ORDER BY worker_id ASC";
+            if let Ok(mut stmt) = conn.prepare(query) {
+                if let Ok(iter) = stmt.query_map([], |row| {
+                    Ok(WorkerDetail {
+                        id: row.get(0)?,
+                        task: row.get(1)?,
+                        cpu: row.get(2)?,
+                        ram: row.get(3)?,
+                        last_seen: row.get(4)?,
+                    })
+                }) {
+                    details.extend(iter.flatten());
+                }
             }
         }
-    }
-    details
+        details
+    }).await.unwrap_or_default()
 }
 
 async fn handle_worker_stdout(
@@ -125,17 +128,25 @@ async fn handle_worker_stdout(
 }
 
 async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option<u32> {
-    let worker_binary = "./target/release/cryscout_worker_rs";
+    let worker_binary = if worker_type == "scouter" {
+        "./target/release/wallet_scout_rs"
+    } else {
+        "./target/release/cryscout_worker_rs"
+    };
     
-    let mut child = match Command::new(worker_binary)
-        .arg(worker_type) // Pass worker type as subcommand
+    let mut command = Command::new(worker_binary);
+    if worker_type != "scouter" {
+        command.arg(worker_type);
+    }
+    
+    let mut child = match command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
     {
         Ok(c) => c,
         Err(e) => {
-            state.write().await.log(format!("Failed to start {}: {}. Is '{}' built?", worker_type, e, worker_binary));
+            state.write().await.log(format!("Failed to start {}: {}.", worker_type, e));
             return None;
         }
     };
@@ -153,10 +164,19 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
             WorkerInfo {
                 _process: child,
                 worker_type: w_type.clone(),
-                started_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(),
+                started_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0),
             },
         );
         s.log(format!("Started {} worker (PID: {})", worker_type, pid));
+        
+        // Immediate DB entry for UI feedback
+        if let Ok(conn) = Connection::open(DB_FILE) {
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO worker_status (worker_id, task, cpu_usage, ram_usage, last_heartbeat)
+                 VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+                params![format!("{}-{}", worker_type, pid), "Initializing...", 0.0, 0.0],
+            );
+        }
     }
     
     let state_clone = Arc::clone(&state);
@@ -173,12 +193,18 @@ async fn update_dashboard_json(state: Arc<RwLock<HubState>>) {
     s.system.refresh_cpu_usage();
     s.system.refresh_memory();
     
+    let last_heartbeat = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+
     let status = HubStatus {
         running: s.running,
         current_task: format!("Hub active: {} workers", worker_details.len()),
         cpu_usage: s.system.global_cpu_info().cpu_usage() as f64,
         ram_usage: (s.system.used_memory() as f64 / s.system.total_memory() as f64) * 100.0,
-        last_heartbeat: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(),
+        last_heartbeat,
+        last_update: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         pid: std::process::id(),
         logs: s.log_buffer.clone(),
         worker_count: worker_details.len(),
@@ -192,25 +218,55 @@ async fn update_dashboard_json(state: Arc<RwLock<HubState>>) {
 
 async fn stop_all(state: Arc<RwLock<HubState>>) {
     let mut s = state.write().await;
-    s.log("Stopping all workers...".to_string());
-    s.running = false;
-    
-    for pid in s.workers.keys() {
-        unsafe {
-            libc::kill(*pid as libc::c_int, libc::SIGTERM);
+    if !s.workers.is_empty() {
+        let count = s.workers.len();
+        s.log(format!("Shutting down fleet: {} active workers.", count));
+        
+        let pids: Vec<u32> = s.workers.keys().cloned().collect();
+        for pid in pids {
+            if let Some(mut info) = s.workers.remove(&pid) {
+                s.log(format!("Stopping {} (PID: {})", info.worker_type, pid));
+                let _ = info._process.kill().await;
+            }
+        }
+        
+        if let Ok(conn) = Connection::open(DB_FILE) {
+            let _ = conn.execute("DELETE FROM worker_status", []);
         }
     }
-    
-    s.workers.clear();
-    s.log("All workers stopped.".to_string());
+    s.running = false;
+    s.log("Fleet status: IDLE".to_string());
 }
 
 async fn check_signals(state: Arc<RwLock<HubState>>) {
     if Path::new(SIGNAL_FILE).exists() {
         if let Ok(sig) = fs::read_to_string(SIGNAL_FILE) {
-            if sig.trim() == "STOP" {
-                let _ = fs::remove_file(SIGNAL_FILE);
+            let signal = sig.trim();
+            if signal.is_empty() { return; }
+            
+            {
+                let mut s = state.write().await;
+                s.log(format!("SIGNAL RECEIVED: {}", signal));
+            }
+            
+            // Remove file before acting to avoid loops if action panics
+            let _ = fs::remove_file(SIGNAL_FILE);
+
+            if signal == "STOP" {
                 stop_all(Arc::clone(&state)).await;
+                state.write().await.log("Hub process exiting per STOP signal.".to_string());
+                std::process::exit(0);
+            } else if signal == "START" || signal == "RESTART" {
+                stop_all(Arc::clone(&state)).await;
+                
+                let mut s = state.write().await;
+                s.running = true;
+                s.log("Spawning fresh worker fleet...".to_string());
+                drop(s);
+
+                for t in WORKER_TYPES {
+                    start_worker(Arc::clone(&state), t).await;
+                }
             }
         }
     }
@@ -219,33 +275,24 @@ async fn check_signals(state: Arc<RwLock<HubState>>) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let state = Arc::new(RwLock::new(HubState::new()));
-    state.write().await.log("CryScout Hub (Rust) initializing...".to_string());
+    println!("[{}] CryScout Hub v3.2 starting up...", Local::now().format("%H:%M:%S"));
 
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
     
     let state_clone_bg = Arc::clone(&state);
     tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(2));
+        let mut interval = time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
-            if !state_clone_bg.read().await.running { break; }
             check_signals(Arc::clone(&state_clone_bg)).await;
             update_dashboard_json(Arc::clone(&state_clone_bg)).await;
         }
     });
 
-    for t in WORKER_TYPES {
-        start_worker(Arc::clone(&state), t).await;
-    }
-
     tokio::select! {
-        _ = sigint.recv() => { stop_all(Arc::clone(&state)).await; }
-        _ = sigterm.recv() => { stop_all(Arc::clone(&state)).await; }
-        _ = async { loop {
-            time::sleep(Duration::from_secs(1)).await;
-            if !state.read().await.running { break; }
-        } } => {}
+        _ = sigint.recv() => { println!("SIGINT received"); stop_all(Arc::clone(&state)).await; }
+        _ = sigterm.recv() => { println!("SIGTERM received"); stop_all(Arc::clone(&state)).await; }
     }
 
     Ok(())

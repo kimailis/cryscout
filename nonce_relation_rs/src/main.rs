@@ -238,14 +238,16 @@ fn main() -> Result<()> {
                 let target_p = p - &dg;
                 if let Some(&j) = point_map.get(&target_p.to_encoded_point(true).to_bytes().to_vec()) {
                     if i != j {
-                        println!("!!! SUCCESS !!! Relation found: k_{} = k_{} + {}", i, j, delta);
                         let delta_s = Scalar::from(delta);
                         let num = delta_s * sigs[i].s * sigs[j].s + sigs[i].s * sigs[j].z - sigs[j].s * sigs[i].z;
                         let den = sigs[j].s * sigs[i].r - sigs[i].s * sigs[j].r;
                         if den != Scalar::ZERO {
                             let d = num * den.invert().unwrap();
-                            println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
-                            return Ok(());
+                            if fast_verify(&d, &target_hashes, &target_pubkey) {
+                                println!("!!! SUCCESS !!! Relation found: k_{} = k_{} + {}", i, j, delta);
+                                println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
+                                return Ok(());
+                            }
                         }
                     }
                 }
@@ -306,7 +308,6 @@ fn main() -> Result<()> {
                     let ap1 = p1 * Scalar::from(a);
                     for b in 1..=args.limit {
                         if ap1 == p2 * Scalar::from(b) {
-                            println!("!!! SUCCESS !!! Ratio found: {}*k_{} = {}*k_{}", a, i, b, j);
                             let s1_inv = sigs[i].s.invert().unwrap();
                             let s2_inv = sigs[j].s.invert().unwrap();
                             let a_s = Scalar::from(a);
@@ -317,8 +318,11 @@ fn main() -> Result<()> {
                             
                             if den != Scalar::ZERO {
                                 let d = num * den.invert().unwrap();
-                                println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
-                                return Ok(());
+                                if fast_verify(&d, &target_hashes, &target_pubkey) {
+                                    println!("!!! SUCCESS !!! Ratio found: {}*k_{} = {}*k_{}", a, i, b, j);
+                                    println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
+                                    return Ok(());
+                                }
                             }
                         }
                     }
