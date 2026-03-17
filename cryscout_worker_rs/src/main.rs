@@ -153,8 +153,7 @@ async fn run_neural_inference(_state: &WorkerState, r_values: &[BigInt]) -> Resu
 }
 
 // --- Striker Logic ---
-async fn run_striker(state: &mut WorkerState) -> Result<()> {
-    state.log("Executing high-precision strike on Top 10 unscanned targets...");
+async fn run_striker(state: &mut WorkerState) -> Result<bool> {
     let mut conn = Connection::open(DB_FILE)?;
     
     // 1. Find targets and mark them as processing immediately in a transaction
@@ -183,9 +182,10 @@ async fn run_striker(state: &mut WorkerState) -> Result<()> {
     };
     
     if targets.is_empty() {
-        state.log("No unscanned high-priority targets found. Run 'scanner' to fetch new ones.");
-        return Ok(());
+        return Ok(false);
     }
+
+    state.log(&format!("Executing high-precision strike on {} targets...", targets.len()));
 
     for (addr, _bal, count, pubkey, score) in targets {
         state.log(&format!("LAUNCHING PRECISION STRIKE: {} (Score: {:.3}, {} sigs)", addr, score, count));
@@ -332,7 +332,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<()> {
         conn.execute("UPDATE addresses SET sigs_scanned = 1, processing_by = NULL WHERE address = ?1", params![&addr])?;
         state.log(&format!("  [-] Strike sequence concluded for {}. Marked as scanned.", addr));
     }
-    Ok(())
+    Ok(true)
 }
 
 
@@ -398,19 +398,22 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Commands::Striker = cli.command {
-        run_striker(&mut state).await?;
-        state.log("Striker task finished. Exiting.");
-        return Ok(());
-    }
-
     let mut int = time::interval(Duration::from_secs(30));
     loop {
         int.tick().await;
         match cli.command {
             Commands::Scanner => { let _ = run_scanner(&mut state).await; }
             Commands::Analyzer => { let _ = run_analyzer(&mut state).await; }
-            Commands::Striker => { let _ = run_striker(&mut state).await; }
+            Commands::Striker => { 
+                match run_striker(&mut state).await {
+                    Ok(found) => {
+                        if !found {
+                            state.log("No targets found for strike. Waiting...");
+                        }
+                    }
+                    Err(e) => state.log(&format!("Striker error: {}", e)),
+                }
+            }
             _ => {}
         }
     }

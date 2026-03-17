@@ -2,9 +2,12 @@
 echo "Initializing CryScout Rust Environment (Service Mode)..."
 
 # Ensure binaries are built
+echo "Building Rust binaries..."
 cargo build --release --quiet
 
 HUB_BIN="./target/release/cryshub_rs"
+WORKER_BIN="./target/release/cryscout_worker_rs"
+SCOUTER_BIN="./target/release/wallet_scout_rs"
 
 if [ ! -f "$HUB_BIN" ]; then
     echo "Error: Hub binary not found at $HUB_BIN"
@@ -12,13 +15,15 @@ if [ ! -f "$HUB_BIN" ]; then
 fi
 
 # Kill any existing hub or workers
+echo "Cleaning up existing processes..."
 pkill -f cryshub_rs
 pkill -f cryscout_worker_rs
 pkill -f wallet_scout_rs
+pkill -f crypdash_rs
 
 # Start Hub in background
 echo "Starting CryScout Hub..."
-$HUB_BIN > hub_live.log 2>&1 &
+nohup $HUB_BIN > hub_live.log 2>&1 &
 HUB_PID=$!
 
 # Give hub a second to start then send RESTART signal to boot workers
