@@ -199,6 +199,11 @@ fn kmeans_cluster(fingerprints: &[AddressFingerprint], k: usize, max_iters: usiz
     clusters
 }
 
+fn resolve_address(conn: &Connection, prefix: &str) -> Option<String> {
+    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE address LIKE ?1 LIMIT 1").ok()?;
+    stmt.query_row(params![format!("{}%", prefix)], |row| row.get(0)).ok()
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -208,6 +213,7 @@ fn main() -> Result<()> {
 
     let dir = &args[1];
     let mut fingerprints = Vec::new();
+    let conn = Connection::open("cryscout.db")?;
 
     println!("Scanning directory for signature files...");
     let entries = fs::read_dir(dir)?;
@@ -216,12 +222,15 @@ fn main() -> Result<()> {
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
-            // Try to extract address from filename, e.g., sigs_1A1zP1...json
-            let address = if filename.starts_with("sigs_") && filename.ends_with(".json") {
+            let prefix = if filename.starts_with("temp_sigs_") && filename.ends_with(".json") {
+                filename[10..filename.len()-5].to_string()
+            } else if filename.starts_with("sigs_") && filename.ends_with(".json") {
                 filename[5..filename.len()-5].to_string()
             } else {
                 filename.clone()
             };
+
+            let address = resolve_address(&conn, &prefix).unwrap_or(prefix);
 
             let content = fs::read_to_string(&path)?;
             if let Ok(sigs) = serde_json::from_str::<Vec<SigEntry>>(&content) {
@@ -242,7 +251,9 @@ fn main() -> Result<()> {
             println!("[Genotype] Cluster {}: {} addresses", i, cluster.len());
             for &idx in cluster.iter().take(5) { // Show up to 5 examples
                 println!("[Genotype]   - {}", fingerprints[idx].address);
-                let _ = log_vulnerability(&fingerprints[idx].address, "Genotype Cluster", "Info", &format!("Part of population cluster {} (total {} members)", i, cluster.len()));
+                if let Err(e) = log_vulnerability(&fingerprints[idx].address, "Genotype Cluster", "Info", &format!("Part of population cluster {} (total {} members)", i, cluster.len())) {
+                    eprintln!("[Genotype] [ERROR] Failed to log vulnerability: {}", e);
+                }
             }
             if cluster.len() > 5 {
                 println!("[Genotype]   ... and {} more", cluster.len() - 5);
