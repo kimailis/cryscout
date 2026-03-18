@@ -63,6 +63,15 @@ CryScout reformulates this into a Closest Vector Problem (CVP) and solves it usi
 - **`bias_detector_rs`**: 
     - **Spectral Bias**: Uses FFT to identify periodic peaks in bit-length or value distributions.
     - **Neural Anomaly**: Runs ONNX inference (FFNN/LSTM) on 438-dimensional feature vectors.
+- **`physics_engine_rs` (Phase II)**:
+    - **Chaos Analyzer**: Maps 3 sequential nonces into 3D phase space to calculate the **Fractal Dimension**; identifies "Strange Attractors" (Lorenz) in PRNG outputs.
+    - **Time-Coupled Entropy**: Detects covariance between transaction timing ($\Delta t$) and nonce distance ($\Delta r$).
+    - **Bit-Plane Spectral FFT**: Isolates bits 0-15 and performs FFT to detect periodic bit-leaks masked by bit-noise.
+    - **Signature Drift**: Detects "Fixed-Seed Startup" bugs by analyzing bias resets across sessions.
+    - **Differential Ratio Scoring**: Identifies stable algebraic ratios between consecutive $r$-values (indicative of LCGs).
+- **`genotype_rs` (Phase II)**:
+    - **Population Fingerprinting**: Generates a **512-D Fingerprint Vector** (LSB/MSB profile, Byte Entropy Map, FFT Peaks, Delta-R distribution) for each address.
+    - **Clustering Engine**: Employs **K-Means Clustering** to group addresses sharing the same "RNG DNA," enabling bulk solving of entire wallet families.
 - **`bleichenbacher_fourier`**: Fourier-based solver for detecting subtle periodicities across large signature sets using 4-list sum combinations.
 
 ---
