@@ -58,6 +58,7 @@ impl WorkerState {
 async fn run_scorer(state: &mut WorkerState) -> Result<()> {
     state.log("Ranking all addresses based on unified scoring system...");
     let conn = Connection::open(DB_FILE)?;
+    conn.pragma_update(None, "busy_timeout", &5000)?;
     
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1")?;
     let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
@@ -155,6 +156,7 @@ async fn run_neural_inference(_state: &WorkerState, r_values: &[BigInt]) -> Resu
 // --- Striker Logic ---
 async fn run_striker(state: &mut WorkerState) -> Result<bool> {
     let mut conn = Connection::open(DB_FILE)?;
+    conn.pragma_update(None, "busy_timeout", &5000)?;
     
     // 1. Find targets and mark them as processing immediately in a transaction
     let targets: Vec<(String, f64, i64, String, f64)> = {
@@ -299,7 +301,21 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
             }
         } else { state.log("  [!] Lattice HNP Attack timed out."); }
 
-        state.log("  [4/5] Bleichenbacher Fourier Analysis...");
+        state.log("  [4/6] Physics Engine RNG Fingerprinting...");
+        if let Ok(Ok(out_chaos)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/physics_engine_rs").arg(&sigs_file).output()).await {
+            let stdout = String::from_utf8_lossy(&out_chaos.stdout);
+            if stdout.contains("POTENTIAL RNG VULNERABILITY DETECTED") { 
+                state.log(&format!("  [!] RNG FINGERPRINT VULNERABILITY DETECTED for {}.", addr)); 
+                let reasons: Vec<&str> = stdout.lines().filter(|l| l.starts_with("- ")).collect();
+                let details = if reasons.is_empty() { "Multiple RNG anomalies detected".to_string() } else { reasons.join("; ") };
+                let _ = conn.execute(
+                    "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                    params![addr, "RNG Fingerprint", "High", details],
+                );
+            }
+        } else { state.log("  [!] Physics Engine Scan timed out."); }
+
+        state.log("  [5/6] Bleichenbacher Fourier Analysis...");
         if let Ok(Ok(out4)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/bleichenbacher_fourier").arg(&sigs_file).output()).await {
             let stdout = String::from_utf8_lossy(&out4.stdout);
             if stdout.contains("POTENTIAL HIT") { 
@@ -311,7 +327,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
             }
         } else { state.log("  [!] Bleichenbacher Fourier Analysis timed out."); }
 
-        state.log("  [5/5] Neural Anomaly Detection (Real ONNX Model)...");
+        state.log("  [6/6] Neural Anomaly Detection (Real ONNX Model)...");
         match run_neural_inference(state, &sigs_for_features).await {
             Ok(prob) => {
                 state.log(&format!("    P(vulnerable) from model: {:.4}", prob));
@@ -341,6 +357,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
 async fn run_scanner(state: &mut WorkerState) -> Result<()> {
     state.log("Checking target queue status...");
     let conn = Connection::open(DB_FILE)?;
+    conn.pragma_update(None, "busy_timeout", &5000)?;
     
     let unscanned: i64 = conn.query_row(
         "SELECT COUNT(*) FROM addresses WHERE (sigs_scanned = 0 OR sigs_scanned IS NULL) AND vulnerability_score > 0",
@@ -358,6 +375,7 @@ async fn run_scanner(state: &mut WorkerState) -> Result<()> {
 }
 async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
     let mut conn = Connection::open(DB_FILE)?;
+    conn.pragma_update(None, "busy_timeout", &5000)?;
     
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND (sigs_scanned = 0 OR sigs_scanned IS NULL) LIMIT 20")?;
     let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();

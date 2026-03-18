@@ -151,10 +151,37 @@ fn get_real_z_segwit(tx: &MempoolTx, vin_index: usize) -> Result<String> {
     outpoint.extend(&target_vin.vout.to_le_bytes());
 
     let prevout = target_vin.prevout.as_ref().context("No prevout for segwit z calculation")?;
-    let pkh = &prevout.scriptpubkey[4..];
-    let mut script_code = hex::decode("1976a914")?;
-    script_code.extend(hex::decode(pkh)?);
-    script_code.extend(hex::decode("88ac")?);
+    
+    // Calculate script_code based on type
+    let script_code = if prevout.scriptpubkey_type == "v0_p2wsh" {
+        // For P2WSH, the script_code is the witness script itself with varint length
+        let witness = target_vin.witness.as_ref().context("No witness for P2WSH")?;
+        let witness_script_hex = witness.last().context("Empty witness for P2WSH")?;
+        let witness_script = hex::decode(witness_script_hex)?;
+        let mut sc = get_varint_bytes(witness_script.len() as u64);
+        sc.extend(witness_script);
+        sc
+    } else {
+        // For P2WPKH (native or nested), script_code is 1976a914<PKH>88ac
+        let pkh = if prevout.scriptpubkey_type == "v0_p2wpkh" {
+            hex::decode(&prevout.scriptpubkey[4..])?
+        } else {
+            // Nested P2WPKH or P2WPKH where we need to derive PKH from public key in witness
+            let witness = target_vin.witness.as_ref().context("No witness for P2WPKH")?;
+            let pubkey_hex = witness.last().context("No pubkey in witness")?;
+            let pubkey_bytes = hex::decode(pubkey_hex)?;
+            let mut sha256 = Sha256::new();
+            sha256.update(pubkey_bytes);
+            let sha256_hash = sha256.finalize();
+            let mut ripemd160 = ripemd::Ripemd160::new();
+            ripemd160.update(&sha256_hash);
+            ripemd160.finalize().to_vec()
+        };
+        let mut sc = hex::decode("1976a914")?;
+        sc.extend(pkh);
+        sc.extend(hex::decode("88ac")?) ;
+        sc
+    };
 
     let value = prevout.value.to_le_bytes().to_vec();
     let sequence = target_vin.sequence.to_le_bytes().to_vec();
@@ -187,21 +214,33 @@ fn get_real_z_segwit(tx: &MempoolTx, vin_index: usize) -> Result<String> {
 }
 
 fn parse_der(sig_hex: &str) -> Option<(String, String)> {
-    let start = sig_hex.find("30")?;
-    let data = hex::decode(&sig_hex[start..]).ok()?;
-    if data.len() < 8 || data[0] != 0x30 { return None; }
+    if sig_hex.len() < 10 { return None; }
     
-    let r_len = data[3] as usize;
-    if data.len() < 4 + r_len + 2 { return None; }
-    let r_bytes = &data[4..4+r_len];
-    
-    let s_tag_idx = 4 + r_len;
-    if data[s_tag_idx] != 0x02 { return None; }
-    let s_len = data[s_tag_idx + 1] as usize;
-    if data.len() < s_tag_idx + 2 + s_len { return None; }
-    let s_bytes = &data[s_tag_idx+2..s_tag_idx+2+s_len];
-
-    Some((hex::encode(r_bytes), hex::encode(s_bytes)))
+    // Find the start of the DER sequence (0x30)
+    // Sometimes it's prefixed by length or other script data
+    let bytes = hex::decode(sig_hex).ok()?;
+    let mut pos = 0;
+    while pos < bytes.len() {
+        if bytes[pos] == 0x30 && pos + 1 < bytes.len() {
+            let len = bytes[pos + 1] as usize;
+            if pos + 2 + len <= bytes.len() {
+                let sub = &bytes[pos..pos + 2 + len];
+                if sub.len() >= 8 && sub[2] == 0x02 {
+                    let r_len = sub[3] as usize;
+                    if sub.len() >= 6 + r_len && sub[4 + r_len] == 0x02 {
+                        let s_len = sub[5 + r_len] as usize;
+                        if sub.len() >= 6 + r_len + s_len {
+                            let r_bytes = &sub[4..4 + r_len];
+                            let s_bytes = &sub[6 + r_len..6 + r_len + s_len];
+                            return Some((hex::encode(r_bytes), hex::encode(s_bytes)));
+                        }
+                    }
+                }
+            }
+        }
+        pos += 1;
+    }
+    None
 }
 
 async fn fetch_tx_data(client: &reqwest::Client, txid: &str) -> Result<MempoolTx> {
@@ -252,33 +291,43 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
 
                 if prevout.scriptpubkey_address.as_deref() == Some(&address) {
                     println!("[DEBUG] Found spend transaction: {} for {}", tx.txid, address);
-                    let sig_hex = if let Some(s) = &vin.scriptsig {
-                        s.clone()
-                    } else if let Some(w) = &vin.witness {
-                        w.first().cloned().unwrap_or_default()
+                    
+                    // Priority: Witness contains the signature for SegWit (including nested P2SH)
+                    let sig_hex = if let Some(w) = &vin.witness {
+                        if !w.is_empty() {
+                            w.first().cloned().unwrap_or_default()
+                        } else {
+                            vin.scriptsig.clone().unwrap_or_default()
+                        }
                     } else {
-                        println!("[DEBUG] No sig_hex found in vin[{}]", vin_idx);
-                        continue;
+                        vin.scriptsig.clone().unwrap_or_default()
                     };
 
                     if let Some((r, s)) = parse_der(&sig_hex) {
-                        let z = match prevout.scriptpubkey_type.as_str() {
-                            "p2pkh" => get_real_z_legacy(&tx, vin_idx),
-                            "v0_p2wpkh" => get_real_z_segwit(&tx, vin_idx),
-                            _ => {
-                                println!("[DEBUG] Unsupported script type: {}", prevout.scriptpubkey_type);
-                                continue;
+                        let is_segwit = vin.witness.as_ref().map(|w| !w.is_empty()).unwrap_or(false);
+                        
+                        let z = if is_segwit {
+                            get_real_z_segwit(&tx, vin_idx).ok()
+                        } else {
+                            match prevout.scriptpubkey_type.as_str() {
+                                "p2pkh" | "p2sh" => get_real_z_legacy(&tx, vin_idx).ok(),
+                                _ => {
+                                    println!("[DEBUG] Unsupported legacy script type: {}", prevout.scriptpubkey_type);
+                                    None
+                                }
                             }
-                        }.ok();
+                        };
 
                         if let Some(z_val) = z {
                             println!("[DEBUG] Successfully extracted sig for {}", address);
-                            let pubkey = if let Some(asm) = &vin.scriptsig_asm {
-                                asm.split_whitespace().last().unwrap_or_default().to_string()
-                            } else if let Some(w) = &vin.witness {
-                                w.last().cloned().unwrap_or_default()
+                            let pubkey = if let Some(w) = &vin.witness {
+                                if w.len() >= 2 {
+                                    w.last().cloned().unwrap_or_default()
+                                } else {
+                                    vin.scriptsig_asm.as_ref().map(|asm| asm.split_whitespace().last().unwrap_or_default().to_string()).unwrap_or_default()
+                                }
                             } else {
-                                String::new()
+                                vin.scriptsig_asm.as_ref().map(|asm| asm.split_whitespace().last().unwrap_or_default().to_string()).unwrap_or_default()
                             };
 
                             all_extracted.push(ExtractedSig {
@@ -289,10 +338,10 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
                                 timestamp: tx.status.block_time,
                             });
                         } else {
-                            println!("[DEBUG] Failed to calculate Z for {}", tx.txid);
+                            println!("[DEBUG] Failed to calculate Z for {} (type: {}, segwit: {})", tx.txid, prevout.scriptpubkey_type, is_segwit);
                         }
                     } else {
-                        println!("[DEBUG] Failed to parse DER signature for {}", address);
+                        println!("[DEBUG] Failed to parse DER signature for {} in tx {}", address, tx.txid);
                     }
                 }
             }
@@ -311,6 +360,7 @@ async fn main() -> Result<()> {
     
     loop {
         let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &5000);
         
         // 1. Identify vulnerable addresses from DB
         let mut stmt = conn.prepare("
@@ -357,6 +407,7 @@ async fn main() -> Result<()> {
                 if sigs.is_empty() { 
                     // Still mark as fetched even if 0 sigs found, to avoid retrying immediately
                     let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &5000);
                     let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
                     continue; 
                 }
@@ -365,6 +416,7 @@ async fn main() -> Result<()> {
                 
                 // Save to DB
                 let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &5000);
                 for sig in sigs {
                     use num_bigint::BigInt;
                     use num_traits::Num;

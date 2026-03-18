@@ -17,6 +17,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reqwest",
+ "ripemd",
  "rusqlite",
  "serde",
  "serde_json",
@@ -862,6 +863,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "genotype_rs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "num-bigint",
+ "num-complex",
+ "num-traits",
+ "rusqlite",
+ "rustfft",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1535,6 +1551,22 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "physics_engine_rs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "nalgebra 0.32.6",
+ "num-bigint",
+ "num-complex",
+ "num-traits",
+ "rusqlite",
+ "rustfft",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "pin-project-lite"
