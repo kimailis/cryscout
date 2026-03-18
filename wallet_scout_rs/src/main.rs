@@ -23,6 +23,7 @@ struct ScouterState {
 
 fn load_targets() -> Result<HashSet<String>> {
     let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &5000);
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE balance > 0")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut targets = HashSet::new();
@@ -35,6 +36,7 @@ fn load_targets() -> Result<HashSet<String>> {
 
 fn log_hit(mnemonic: &str, path: &str, address: &str, privkey: &str) -> Result<()> {
     let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &5000);
     conn.execute(
         "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
         params![address, privkey, format!("WalletScout: {}", path)],
