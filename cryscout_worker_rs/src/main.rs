@@ -357,8 +357,76 @@ async fn run_scanner(state: &mut WorkerState) -> Result<()> {
     Ok(())
 }
 async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
-    state.log("Analyzing new targets...");
-    Ok(()) // Simplified for this test
+    let mut conn = Connection::open(DB_FILE)?;
+    
+    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND (sigs_scanned = 0 OR sigs_scanned IS NULL) LIMIT 20")?;
+    let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
+    
+    if addresses.is_empty() {
+        return Ok(());
+    }
+
+    state.log(&format!("Analyzer found {} addresses to process.", addresses.len()));
+
+    for addr in addresses {
+        state.log(&format!("Analyzer processing: {}", addr));
+        let mut sig_stmt = conn.prepare("SELECT r_int, s_int, timestamp FROM signatures WHERE address = ?1")?;
+        let sigs: Vec<features::SigData> = sig_stmt.query_map(params![&addr], |r| {
+            let r_str: String = r.get(0)?;
+            let s_str: String = r.get(1)?;
+            let t: Option<u64> = r.get(2)?;
+            Ok(features::SigData {
+                r: BigInt::from_str_radix(&r_str, 10).unwrap_or_default(),
+                s: BigInt::from_str_radix(&s_str, 10).unwrap_or_default(),
+                timestamp: t,
+            })
+        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+
+        if sigs.is_empty() {
+            state.log(&format!("Analyzer: No signatures in DB for {}", addr));
+            conn.execute("UPDATE addresses SET sigs_scanned = 1 WHERE address = ?1", params![addr])?;
+            continue;
+        }
+
+        state.log(&format!("Analyzer: Found {} signatures for {}", sigs.len(), addr));
+
+        if let Some(f) = features::ScoringFeatures::extract(&sigs) {
+            state.log(&format!("Analyzer: Extracted features for {}. Scoring...", addr));
+            let mut score = (1.0 - f.r_entropy) * 0.4 
+                      + f.lsb_bias * 0.4 
+                      + f.fft_peak_score * 0.1 
+                      + f.correlation_score.abs() * 0.1;
+            
+            if f.wallet_fingerprint.contains("Android") || f.wallet_fingerprint.contains("OpenSSL") || f.wallet_fingerprint.contains("Low Entropy") {
+                score += 1.0;
+            }
+            
+            let count_boost = (f.num_signatures as f64 / 100.0).min(0.2);
+            score += count_boost;
+
+            // Eras
+            let meta: (Option<String>, Option<String>, Option<f64>) = conn.query_row(
+                "SELECT first_seen, last_seen, balance FROM addresses WHERE address = ?1",
+                params![&addr],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            ).unwrap_or((None, None, None));
+
+            if let Some(fs) = meta.0 {
+                if fs.contains("2009") || fs.contains("2010") { score += 1.5; }
+                else if fs.contains("2011") || fs.contains("2012") { score += 1.0; }
+                else if fs.contains("2013") || fs.contains("2014") || fs.contains("2015") { score += 0.5; }
+            }
+
+            conn.execute(
+                "UPDATE addresses SET vulnerability_score = ?1, potential_weakness = ?2, sigs_scanned = 1 WHERE address = ?3",
+                params![score, f.wallet_fingerprint, addr],
+            )?;
+        } else {
+            conn.execute("UPDATE addresses SET sigs_scanned = 1 WHERE address = ?1", params![addr])?;
+        }
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
