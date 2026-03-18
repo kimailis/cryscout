@@ -12,6 +12,8 @@ dependencies = [
  "futures-util",
  "hex",
  "libc",
+ "num-bigint",
+ "num-traits",
  "rand 0.8.5",
  "rayon",
  "reqwest",

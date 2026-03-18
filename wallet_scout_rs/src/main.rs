@@ -52,6 +52,7 @@ fn log_hit(mnemonic: &str, path: &str, address: &str, privkey: &str) -> Result<(
 }
 
 fn main() -> Result<()> {
+    rayon::ThreadPoolBuilder::new().num_threads(1).build_global().unwrap();
     let targets = load_targets()?;
     if targets.is_empty() {
         println!("No targets found. Check addresses table.");
@@ -72,6 +73,7 @@ fn main() -> Result<()> {
             std::thread::sleep(Duration::from_secs(2));
             let current_count = state_monitor.checked_count.load(Ordering::Relaxed);
             let diff = current_count - last_count;
+            last_count = current_count;
             let kps = diff as f64 / 2.0;
             let total_elapsed = state_monitor.start_time.elapsed().as_secs();
             

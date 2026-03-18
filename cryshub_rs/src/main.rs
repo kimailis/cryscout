@@ -18,7 +18,7 @@ const STATUS_FILE: &str = "service_status.json";
 const SIGNAL_FILE: &str = "service_signal.txt";
 const DB_FILE: &str = "cryscout.db";
 
-const WORKER_TYPES: &[&str] = &["scanner", "analyzer", "striker", "scouter"];
+const WORKER_TYPES: &[&str] = &["scanner", "analyzer", "striker", "scouter", "fetcher"];
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct WorkerDetail {
@@ -128,10 +128,10 @@ async fn handle_worker_stdout(
 }
 
 async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option<u32> {
-    let worker_binary = if worker_type == "scouter" {
-        "./target/release/wallet_scout_rs"
-    } else {
-        "./target/release/cryscout_worker_rs"
+    let worker_binary = match worker_type {
+        "scouter" => "./target/release/wallet_scout_rs",
+        "fetcher" => "./target/release/address_analyzer_rs",
+        _ => "./target/release/cryscout_worker_rs",
     };
     
     let mut command = Command::new(worker_binary);

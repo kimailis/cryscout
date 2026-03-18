@@ -218,114 +218,171 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
     let _permit = sem.acquire().await?;
     println!("[INFO] Analyzing address: {}", address);
 
-    let url = format!("https://mempool.space/api/address/{}/txs/chain", address);
-    let ua = USER_AGENTS.choose(&mut rand::thread_rng()).unwrap();
-    let resp = client.get(url).header("User-Agent", *ua).send().await?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("Failed to fetch txids for {}", address));
-    }
-    let txs = resp.json::<Vec<MempoolTx>>().await?;
+    let mut all_extracted = Vec::new();
+    let mut last_txid = None;
     
-    let mut extracted = Vec::new();
-    for tx in txs {
-        for (vin_idx, vin) in tx.vin.iter().enumerate() {
-            let prevout = match &vin.prevout {
-                Some(p) => p,
-                None => continue,
-            };
+    loop {
+        let url = if let Some(txid) = &last_txid {
+            format!("https://mempool.space/api/address/{}/txs/chain/{}", address, txid)
+        } else {
+            format!("https://mempool.space/api/address/{}/txs/chain", address)
+        };
+        
+        let ua = USER_AGENTS.choose(&mut rand::thread_rng()).unwrap();
+        let resp = client.get(url).header("User-Agent", *ua).send().await?;
+        if !resp.status().is_success() {
+            if resp.status().as_u16() == 429 {
+                sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+            break;
+        }
+        let txs = resp.json::<Vec<MempoolTx>>().await?;
+        if txs.is_empty() { break; }
+        println!("[DEBUG] Fetched {} transactions for {}", txs.len(), address);
+        
+        last_txid = txs.last().map(|t| t.txid.clone());
 
-            if prevout.scriptpubkey_address.as_deref() == Some(&address) {
-                let sig_hex = if let Some(s) = &vin.scriptsig {
-                    s.clone()
-                } else if let Some(w) = &vin.witness {
-                    w.first().cloned().unwrap_or_default()
-                } else {
-                    continue;
+        for tx in txs {
+            for (vin_idx, vin) in tx.vin.iter().enumerate() {
+                let prevout = match &vin.prevout {
+                    Some(p) => p,
+                    None => continue,
                 };
 
-                if let Some((r, s)) = parse_der(&sig_hex) {
-                    let z = match prevout.scriptpubkey_type.as_str() {
-                        "p2pkh" => get_real_z_legacy(&tx, vin_idx),
-                        "v0_p2wpkh" => get_real_z_segwit(&tx, vin_idx),
-                        _ => continue,
-                    }.ok();
+                if prevout.scriptpubkey_address.as_deref() == Some(&address) {
+                    println!("[DEBUG] Found spend transaction: {} for {}", tx.txid, address);
+                    let sig_hex = if let Some(s) = &vin.scriptsig {
+                        s.clone()
+                    } else if let Some(w) = &vin.witness {
+                        w.first().cloned().unwrap_or_default()
+                    } else {
+                        println!("[DEBUG] No sig_hex found in vin[{}]", vin_idx);
+                        continue;
+                    };
 
-                    if let Some(z_val) = z {
-                        let pubkey = if let Some(asm) = &vin.scriptsig_asm {
-                            asm.split_whitespace().last().unwrap_or_default().to_string()
-                        } else if let Some(w) = &vin.witness {
-                            w.last().cloned().unwrap_or_default()
+                    if let Some((r, s)) = parse_der(&sig_hex) {
+                        let z = match prevout.scriptpubkey_type.as_str() {
+                            "p2pkh" => get_real_z_legacy(&tx, vin_idx),
+                            "v0_p2wpkh" => get_real_z_segwit(&tx, vin_idx),
+                            _ => {
+                                println!("[DEBUG] Unsupported script type: {}", prevout.scriptpubkey_type);
+                                continue;
+                            }
+                        }.ok();
+
+                        if let Some(z_val) = z {
+                            println!("[DEBUG] Successfully extracted sig for {}", address);
+                            let pubkey = if let Some(asm) = &vin.scriptsig_asm {
+                                asm.split_whitespace().last().unwrap_or_default().to_string()
+                            } else if let Some(w) = &vin.witness {
+                                w.last().cloned().unwrap_or_default()
+                            } else {
+                                String::new()
+                            };
+
+                            all_extracted.push(ExtractedSig {
+                                r, s, z: z_val,
+                                txid: tx.txid.clone(),
+                                vin: vin_idx as u32,
+                                pubkey,
+                                timestamp: tx.status.block_time,
+                            });
                         } else {
-                            String::new()
-                        };
-
-                        extracted.push(ExtractedSig {
-                            r, s, z: z_val,
-                            txid: tx.txid.clone(),
-                            vin: vin_idx as u32,
-                            pubkey,
-                            timestamp: tx.status.block_time,
-                        });
+                            println!("[DEBUG] Failed to calculate Z for {}", tx.txid);
+                        }
+                    } else {
+                        println!("[DEBUG] Failed to parse DER signature for {}", address);
                     }
                 }
             }
         }
+        
+        if all_extracted.len() > 500 { break; } // Limit per address
+        sleep(Duration::from_millis(500)).await; // Small delay between pages
     }
     
-    Ok(extracted)
+    Ok(all_extracted)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let conn = Connection::open(DB_FILE)?;
+    println!("[START] Address Analyzer Service started.");
     
-    // 1. Identify vulnerable addresses from DB
-    let mut stmt = conn.prepare("
-        SELECT address FROM addresses 
-        WHERE status = 'Spent/Active' 
-        OR potential_weakness != 'None Identified'
-        OR label = 'Lattice Target'
-        LIMIT 100
-    ")?;
-    
-    let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?
-        .flatten()
-        .collect();
+    loop {
+        let conn = Connection::open(DB_FILE)?;
+        
+        // 1. Identify vulnerable addresses from DB
+        let mut stmt = conn.prepare("
+            SELECT address FROM addresses 
+            WHERE (status = 'Spent/Active' 
+            OR potential_weakness != 'None Identified'
+            OR label = 'Lattice Target'
+            OR status = 'Target'
+            OR transactions > 0)
+            AND (sigs_fetched = 0 OR sigs_fetched IS NULL)
+            ORDER BY transactions DESC, balance DESC
+            LIMIT 50
+        ")?;
+        
+        let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?
+            .flatten()
+            .collect();
 
-    println!("[START] Found {} target addresses to analyze.", addresses.len());
+        if addresses.is_empty() {
+            println!("[INFO] No new target addresses to analyze. Sleeping...");
+            sleep(Duration::from_secs(60)).await;
+            continue;
+        }
 
-    let client = Arc::new(reqwest::Client::new());
-    let sem = Arc::new(Semaphore::new(3)); // Rate limiting
-    
-    let mut tasks = Vec::new();
-    for addr in addresses {
-        let c = Arc::clone(&client);
-        let s = Arc::clone(&sem);
-        tasks.push(tokio::spawn(async move {
-            (addr.clone(), analyze_address(c, addr, s).await)
-        }));
-    }
+        println!("[START] Found {} target addresses to analyze.", addresses.len());
 
-    let results = join_all(tasks).await;
-    
-    let mut total_sigs = 0;
-    for res in results {
-        if let Ok((addr, Ok(sigs))) = res {
-            if sigs.is_empty() { continue; }
-            println!("[SUCCESS] Extracted {} sigs for {}", sigs.len(), addr);
-            total_sigs += sigs.len();
-            
-            // Save to DB
-            let conn = Connection::open(DB_FILE)?;
-            for sig in sigs {
-                let _ = conn.execute(
-                    "INSERT OR IGNORE INTO signatures (address, r, s, z, txid, vin, pubkey_hex, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![addr, sig.r, sig.s, sig.z, sig.txid, sig.vin, sig.pubkey, sig.timestamp],
-                );
+        let client = Arc::new(reqwest::Client::new());
+        let sem = Arc::new(Semaphore::new(3)); // Rate limiting
+        
+        let mut tasks = Vec::new();
+        for addr in addresses {
+            let c = Arc::clone(&client);
+            let s = Arc::clone(&sem);
+            tasks.push(tokio::spawn(async move {
+                (addr.clone(), analyze_address(c, addr, s).await)
+            }));
+        }
+
+        let results = join_all(tasks).await;
+        
+        let mut total_sigs = 0;
+        for res in results {
+            if let Ok((addr, Ok(sigs))) = res {
+                if sigs.is_empty() { 
+                    // Still mark as fetched even if 0 sigs found, to avoid retrying immediately
+                    let conn = Connection::open(DB_FILE)?;
+                    let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
+                    continue; 
+                }
+                println!("[SUCCESS] Extracted {} sigs for {}", sigs.len(), addr);
+                total_sigs += sigs.len();
+                
+                // Save to DB
+                let conn = Connection::open(DB_FILE)?;
+                for sig in sigs {
+                    use num_bigint::BigInt;
+                    use num_traits::Num;
+                    let r_int = BigInt::from_str_radix(&sig.r, 16).unwrap_or_default().to_str_radix(10);
+                    let s_int = BigInt::from_str_radix(&sig.s, 16).unwrap_or_default().to_str_radix(10);
+                    let z_int = BigInt::from_str_radix(&sig.z, 16).unwrap_or_default().to_str_radix(10);
+                    
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO signatures (address, r_hex, s_hex, z_hex, r_int, s_int, z_int, txid, vin, pubkey_hex, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        params![addr, sig.r, sig.s, sig.z, r_int, s_int, z_int, sig.txid, sig.vin, sig.pubkey, sig.timestamp],
+                    );
+                }
+                // Mark address as sigs_fetched
+                let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
             }
         }
-    }
 
-    println!("[FINISH] Collected total of {} signatures.", total_sigs);
-    Ok(())
+        println!("[FINISH] Collected total of {} signatures. Sleeping...", total_sigs);
+        sleep(Duration::from_secs(60)).await;
+    }
 }
