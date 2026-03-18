@@ -19,7 +19,7 @@ struct SigEntry {
 
 fn log_vulnerability(address: &str, v_type: &str, severity: &str, details: &str) -> Result<()> {
     let conn = Connection::open("cryscout.db")?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.busy_timeout(std::time::Duration::from_secs(30))?;
     conn.execute(
         "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, details, found_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))",
         params![address, v_type, severity, details],

@@ -292,38 +292,44 @@ fn main() -> Result<()> {
 
     // 3. Brute Force Point Ratios O(N^2 * Ratios)
     if let Some(q) = target_pubkey {
-        println!("Running O(N^2) Point Ratio Scan (a*k_i = b*k_j)...");
+        println!("Running Optimized O(N*L) Point Ratio Scan (a*k_i = b*k_j)...");
         let points: Vec<ProjectivePoint> = sigs.par_iter().map(|sig| {
             let s_inv = sig.s.invert().unwrap();
             (g * sig.z + q * sig.r) * s_inv
         }).collect();
 
+        let mut lookup = HashMap::new();
+        
+        // Phase 1: Build lookup table
         for i in 0..points.len() {
-            if i % 10 == 0 && args.verbose { println!("  Processing sig {}/{}", i, points.len()); }
-            for j in (i + 1)..points.len() {
-                let p1 = points[i];
-                let p2 = points[j];
-                
-                for a in 1..=args.limit {
-                    let ap1 = p1 * Scalar::from(a);
-                    for b in 1..=args.limit {
-                        if ap1 == p2 * Scalar::from(b) {
-                            let s1_inv = sigs[i].s.invert().unwrap();
-                            let s2_inv = sigs[j].s.invert().unwrap();
-                            let a_s = Scalar::from(a);
-                            let b_s = Scalar::from(b);
-                            
-                            let num = b_s * s2_inv * sigs[j].z - a_s * s1_inv * sigs[i].z;
-                            let den = a_s * s1_inv * sigs[i].r - b_s * s2_inv * sigs[j].r;
-                            
-                            if den != Scalar::ZERO {
-                                let d = num * den.invert().unwrap();
-                                if fast_verify(&d, &target_hashes, &target_pubkey) {
-                                    println!("!!! SUCCESS !!! Ratio found: {}*k_{} = {}*k_{}", a, i, b, j);
-                                    println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
-                                    return Ok(());
-                                }
-                            }
+            for a in 1..=args.limit {
+                let ap = points[i] * Scalar::from(a);
+                // Store the first occurrence of this point
+                lookup.entry(ap.to_encoded_point(true)).or_insert((i, a));
+            }
+        }
+
+        // Phase 2: Search for matches
+        for j in 0..points.len() {
+            for b in 1..=args.limit {
+                let bp = points[j] * Scalar::from(b);
+                if let Some(&(i, a)) = lookup.get(&bp.to_encoded_point(true)) {
+                    if i == j && a == b { continue; } // Skip self-match
+                    
+                    let s1_inv = sigs[i].s.invert().unwrap();
+                    let s2_inv = sigs[j].s.invert().unwrap();
+                    let a_s = Scalar::from(a);
+                    let b_s = Scalar::from(b);
+                    
+                    let num = b_s * s2_inv * sigs[j].z - a_s * s1_inv * sigs[i].z;
+                    let den = a_s * s1_inv * sigs[i].r - b_s * s2_inv * sigs[j].r;
+                    
+                    if den != Scalar::ZERO {
+                        let d = num * den.invert().unwrap();
+                        if fast_verify(&d, &target_hashes, &target_pubkey) {
+                            println!("!!! SUCCESS !!! Ratio found: {}*k_{} = {}*k_{}", a, i, b, j);
+                            println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
+                            return Ok(());
                         }
                     }
                 }

