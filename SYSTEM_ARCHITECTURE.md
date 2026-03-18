@@ -5,6 +5,9 @@ CryScout is a high-performance, distributed cryptanalytic suite designed to iden
 
 The primary objective of CryScout is to discover compromised wallets resulting from weak Random Number Generators (RNGs) used during transaction signing or wallet generation, thereby exposing the private key.
 
+### 1.1 The "Real Data" Mandate
+CryScout operates under a strict "Real Data Only" mandate. No simulated, fictional, or artificially generated target addresses are processed. Every address targeted by the system is mathematically verified to exist on the live Bitcoin blockchain and strictly enforces a minimum active balance requirement of $\ge 20 \text{ BTC}$.
+
 ---
 
 ## 2. Cryptographic Algorithmics
@@ -48,11 +51,12 @@ CryScout reformulates this into a Closest Vector Problem (CVP) and solves it usi
 ### 3.2 Workers & Analyzers
 - **`cryscout_worker_rs`**: A multi-mode worker:
     - **Scanner**: Monitors target queue; triggers replenishment if unscanned high-priority targets < 5.
-    - **Analyzer**: (Stubbed) Performs initial statistical passes.
-    - **Scorer**: Calculates multi-factor risk scores.
-    - **Striker**: Executes the High-Precision Strike sequence.
-- **`address_analyzer_rs`**: Fetches signatures and reconstructs message hashes (`z-values`).
-- **`wallet_scout_rs`**: High-speed BIP39 mnemonic scouter (~150k kps).
+    - **Analyzer**: Extracts statistical and cryptographic features to score the address.
+    - **Scorer**: Calculates multi-factor risk scores, actively filtering out any target with `< 20 BTC` balance.
+    - **Striker**: Executes the High-Precision Strike sequence exclusively on "Easy" targets ($\ge 20$ BTC, Score > 5.0).
+- **`address_analyzer_rs`**: The **Fetcher**. Polls live blockchain data via mempool.space API. Strictly fetches transactions and signatures for authentic addresses holding $\ge 20$ BTC. 
+- **`wallet_scout_rs`**: The **Global Scouter**. High-speed BIP39 mnemonic bruteforcer (~350k kps). Generates random seeds and checks the derived Legacy (`1...`) and P2SH (`3...`) addresses against the verified target database.
+- **`neural_scout_rs`**: The **Neural Autocorrect Scouter**. Iterates through targeted, mathematically probable failure patterns (e.g., 2009-2014 Unix timestamps, 32-bit low-entropy buffers) and tests derived keys against the top "Easy" targets in real-time.
 
 ### 3.3 Attack Modules (Precision Strike Suite)
 - **`nonce_relation_rs`**: 
@@ -72,7 +76,19 @@ CryScout reformulates this into a Closest Vector Problem (CVP) and solves it usi
 - **`genotype_rs` (Phase II)**:
     - **Population Fingerprinting**: Generates a **512-D Fingerprint Vector** (LSB/MSB profile, Byte Entropy Map, FFT Peaks, Delta-R distribution) for each address.
     - **Clustering Engine**: Employs **K-Means Clustering** to group addresses sharing the same "RNG DNA," enabling bulk solving of entire wallet families.
+- **`neural_scout_rs` (Phase II)**:
+    - **Neural Autocorrect**: Instead of random BIP39 generation, it uses common RNG failure patterns (e.g., Timestamp-seeding, Low-entropy buffers) to generate high-probability mnemonic sequences.
+    - **Target-Specific Pools**: Focuses brute-force power on specific failure modes identified by the Scorer for "Easy" targets.
 - **`bleichenbacher_fourier`**: Fourier-based solver for detecting subtle periodicities across large signature sets using 4-list sum combinations.
+
+---
+
+## 3. Scoring & Prioritization Strategy (Refined)
+The system prioritizes **Ease of Access** over **Total Balance**. High-priority "Easy Targets" (Score > 5.0) are defined by:
+1.  **Low-Order Bit Predictability**: Predictable LSBs provide ideal entry points for lattice reduction.
+2.  **RNG DNA Matches**: Wallets sharing fingerprints with known broken implementations (e.g., Android RNG bug, OpenSSL low-entropy PRNG).
+3.  **Era Context**: Addresses created during 2009-2012 are boosted due to the higher prevalence of weak PRNGs in early wallet software.
+4.  **Neural Anomaly Probability**: High non-randomness scores ($P > 0.9$) from the FFNN/LSTM models.
 
 ---
 

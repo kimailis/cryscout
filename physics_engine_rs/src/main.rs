@@ -265,7 +265,9 @@ fn main() -> Result<()> {
     }
 
     let filename = Path::new(&args[1]).file_name().unwrap_or_default().to_string_lossy().to_string();
-    let address = if filename.starts_with("sigs_") && filename.ends_with(".json") {
+    let address = if filename.starts_with("temp_sigs_") && filename.ends_with(".json") {
+        filename[10..filename.len()-5].to_string()
+    } else if filename.starts_with("sigs_") && filename.ends_with(".json") {
         filename[5..filename.len()-5].to_string()
     } else {
         filename.clone()

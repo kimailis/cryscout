@@ -371,6 +371,7 @@ async fn main() -> Result<()> {
             OR status = 'Target'
             OR transactions > 0)
             AND (sigs_fetched = 0 OR sigs_fetched IS NULL)
+            AND balance >= 20.0
             ORDER BY transactions DESC, balance DESC
             LIMIT 50
         ")?;

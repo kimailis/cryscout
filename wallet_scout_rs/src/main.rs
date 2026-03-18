@@ -24,7 +24,7 @@ struct ScouterState {
 fn load_targets() -> Result<HashSet<String>> {
     let conn = Connection::open(DB_FILE)?;
     let _ = conn.pragma_update(None, "busy_timeout", &5000);
-    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE balance > 0")?;
+    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE balance >= 20.0")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut targets = HashSet::new();
     for row in rows {
@@ -124,8 +124,8 @@ fn main() -> Result<()> {
             let seed = Seed::new(&mnemonic, "");
             let root = ExtendedPrivKey::new_master(network, seed.as_bytes()).unwrap();
 
-            let mut last_addr = "".to_string();
-            let mut last_mnemonic = "".to_string();
+            let mut sampled_addr = "".to_string();
+            let mut last_mnemonic = mnemonic.phrase().to_string();
 
             for (path, path_str) in &parsed_paths {
                 let derived = root.derive_priv(&secp, path).unwrap();
@@ -141,8 +141,11 @@ fn main() -> Result<()> {
                 };
 
                 let addr_str = address.to_string();
-                last_addr = addr_str.clone();
-                last_mnemonic = mnemonic.phrase().to_string();
+                
+                // Pick an address to show in the UI (prefer Legacy or P2SH as we have those in DB)
+                if addr_str.starts_with('1') || (sampled_addr.is_empty() && addr_str.starts_with('3')) {
+                    sampled_addr = addr_str.clone();
+                }
 
                 if state.targets.contains(&addr_str) {
                     let _ = log_hit(mnemonic.phrase(), path_str, &addr_str, &hex::encode(secret_key.secret_bytes()));
@@ -150,10 +153,11 @@ fn main() -> Result<()> {
             }
             state.checked_count.fetch_add(1, Ordering::Relaxed);
             
-            // Periodically update live sample (not every key to avoid lock contention)
+            // Periodically update live sample
             if rand::random::<u16>() % 500 == 0 {
                 if let Ok(mut sample) = state.live_sample.write() {
-                    *sample = Some((last_mnemonic, last_addr));
+                    if sampled_addr.is_empty() { sampled_addr = "bc1q...".to_string(); }
+                    *sample = Some((last_mnemonic, sampled_addr));
                 }
             }
         });
