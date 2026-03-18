@@ -18,6 +18,7 @@ struct NeuralGenerator {
 
 fn load_easy_targets() -> Result<HashSet<String>> {
     let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE vulnerability_score > 5.0 AND balance >= 20.0")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut targets = HashSet::new();
@@ -30,6 +31,7 @@ fn load_easy_targets() -> Result<HashSet<String>> {
 
 fn log_hit(mnemonic: &str, path: &str, address: &str, privkey: &str) -> Result<()> {
     let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
     conn.execute(
         "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
         params![address, privkey, format!("NeuralScout: {}", path)],
@@ -49,6 +51,27 @@ fn main() -> Result<()> {
         targets,
         checked_count: AtomicU64::new(0),
     });
+
+    let gen_monitor = Arc::clone(&gen);
+    std::thread::spawn(move || {
+        let conn = match Connection::open(DB_FILE) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.pragma_update(None, "busy_timeout", &30000);
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let current_count = gen_monitor.checked_count.load(Ordering::Relaxed);
+            let task_msg = format!("Neural Scouting ({} checked)", current_count);
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO worker_status (worker_id, task, cpu_usage, ram_usage, last_heartbeat)
+                 VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+                params![format!("NeuralScout-{}", std::process::id()), task_msg, 0.0, 0.0],
+            );
+        }
+    });
+
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
 
     let secp = Secp256k1::new();
     let network = Network::Bitcoin;

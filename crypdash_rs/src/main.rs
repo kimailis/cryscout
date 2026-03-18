@@ -180,7 +180,7 @@ impl App {
 
     fn get_db_stats(&self) -> Result<Stats> {
         let conn = Connection::open(DB_PATH)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.busy_timeout(Duration::from_secs(30))?;
         let mut stats = Stats::default();
         stats.total = conn.query_row("SELECT COUNT(*) FROM addresses", [], |r| r.get(0)).unwrap_or(0);
         stats.analyzed = conn.query_row("SELECT COUNT(*) FROM addresses WHERE sigs_scanned = 1", [], |r| r.get(0)).unwrap_or(0);
@@ -234,7 +234,7 @@ impl App {
 
     fn get_potential_targets(&self) -> Result<Vec<PotentialTarget>> {
         let conn = Connection::open(DB_PATH)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.busy_timeout(Duration::from_secs(30))?;
         let mut stmt = conn.prepare("SELECT address, balance, COALESCE(potential_weakness, 'Statistical Bias') FROM addresses WHERE vulnerability_score > 0 ORDER BY rank ASC LIMIT 20")?;
         let rows = stmt.query_map([], |row| Ok(PotentialTarget { address: row.get(0)?, balance: format!("{:.2} BTC", row.get::<_, f64>(1)?), reason: row.get(2)? }))?;
         let mut targets = Vec::new();
@@ -244,7 +244,7 @@ impl App {
 
     fn get_recovered_keys(&self) -> Result<(Vec<RecoveredKey>, f64)> {
         let conn = Connection::open(DB_PATH)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.busy_timeout(Duration::from_secs(30))?;
         let mut stmt = conn.prepare("SELECT r.address, r.privkey_hex, r.method, COALESCE(a.balance, 0.0) FROM recovered_keys r LEFT JOIN addresses a ON r.address = a.address")?;
         let rows = stmt.query_map([], |row| Ok(RecoveredKey { address: row.get(0)?, key: row.get(1)?, method: row.get(2)?, balance: row.get(3)? }))?;
         let mut keys = Vec::new();
@@ -256,7 +256,7 @@ impl App {
     fn get_attack_reports(&self) -> Result<Vec<AttackReport>> {
         let mut reports = Vec::new();
         let conn = Connection::open(DB_PATH)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.busy_timeout(Duration::from_secs(30))?;
         let mut stmt = conn.prepare("SELECT address, type, severity, details FROM vulnerabilities ORDER BY found_at DESC LIMIT 50")?;
         let rows = stmt.query_map([], |row| Ok(AttackReport { address: row.get(0)?, method: row.get(1)?, severity: row.get(2)?, details: row.get(3)? }))?;
         for row in rows { reports.push(row?); }

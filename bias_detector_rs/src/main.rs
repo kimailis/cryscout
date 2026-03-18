@@ -212,6 +212,7 @@ fn main() -> Result<()> {
 
     let address = &args[1];
     let conn = Connection::open(DB_FILE)?;
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
     
     log(&format!("Loading signatures for address: {}", address));
     let mut stmt = conn.prepare("SELECT r_int, r_hex, s_hex, z_hex FROM signatures WHERE address = ?1")?;

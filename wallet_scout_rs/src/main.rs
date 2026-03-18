@@ -23,7 +23,7 @@ struct ScouterState {
 
 fn load_targets() -> Result<HashSet<String>> {
     let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &5000);
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
     let mut stmt = conn.prepare("SELECT address FROM addresses WHERE balance >= 20.0")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut targets = HashSet::new();
@@ -36,7 +36,7 @@ fn load_targets() -> Result<HashSet<String>> {
 
 fn log_hit(mnemonic: &str, path: &str, address: &str, privkey: &str) -> Result<()> {
     let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &5000);
+    let _ = conn.pragma_update(None, "busy_timeout", &30000);
     conn.execute(
         "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
         params![address, privkey, format!("WalletScout: {}", path)],
@@ -54,7 +54,7 @@ fn log_hit(mnemonic: &str, path: &str, address: &str, privkey: &str) -> Result<(
 }
 
 fn main() -> Result<()> {
-    rayon::ThreadPoolBuilder::new().num_threads(1).build_global().unwrap();
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
     let targets = load_targets()?;
     if targets.is_empty() {
         println!("No targets found. Check addresses table.");
@@ -72,11 +72,11 @@ fn main() -> Result<()> {
     std::thread::spawn(move || {
         let mut last_count = 0;
         loop {
-            std::thread::sleep(Duration::from_secs(2));
+            std::thread::sleep(Duration::from_secs(60));
             let current_count = state_monitor.checked_count.load(Ordering::Relaxed);
             let diff = current_count - last_count;
             last_count = current_count;
-            let kps = diff as f64 / 2.0;
+            let kps = diff as f64 / 60.0;
             let total_elapsed = state_monitor.start_time.elapsed().as_secs();
             
             let sample_str = if let Ok(sample) = state_monitor.live_sample.read() {
@@ -111,12 +111,13 @@ fn main() -> Result<()> {
     let paths = vec![
         "m/44'/0'/0'/0/0",
         "m/49'/0'/0'/0/0",
-        "m/84'/0'/0'/0/0",
     ];
     
     let parsed_paths: Vec<(DerivationPath, &str)> = paths.into_iter().map(|p| {
         (p.parse::<DerivationPath>().expect("Valid path"), p)
     }).collect();
+
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
 
     loop {
         (0..1000).into_par_iter().for_each(|_| {
@@ -125,7 +126,7 @@ fn main() -> Result<()> {
             let root = ExtendedPrivKey::new_master(network, seed.as_bytes()).unwrap();
 
             let mut sampled_addr = "".to_string();
-            let mut last_mnemonic = mnemonic.phrase().to_string();
+            let last_mnemonic = mnemonic.phrase().to_string();
 
             for (path, path_str) in &parsed_paths {
                 let derived = root.derive_priv(&secp, path).unwrap();
@@ -134,15 +135,13 @@ fn main() -> Result<()> {
                 
                 let address = if path_str.contains("44'") {
                     Address::p2pkh(&pubkey, network)
-                } else if path_str.contains("49'") {
-                    Address::p2shwpkh(&pubkey, network).expect("P2SH-WPKH")
                 } else {
-                    Address::p2wpkh(&pubkey, network).expect("P2WPKH")
+                    Address::p2shwpkh(&pubkey, network).expect("P2SH-WPKH")
                 };
 
                 let addr_str = address.to_string();
                 
-                // Pick an address to show in the UI (prefer Legacy or P2SH as we have those in DB)
+                // Pick an address to show in the UI (prefer Legacy)
                 if addr_str.starts_with('1') || (sampled_addr.is_empty() && addr_str.starts_with('3')) {
                     sampled_addr = addr_str.clone();
                 }

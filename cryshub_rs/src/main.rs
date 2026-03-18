@@ -81,7 +81,7 @@ async fn get_worker_details() -> Vec<WorkerDetail> {
     tokio::task::spawn_blocking(|| {
         let mut details = Vec::new();
         if let Ok(conn) = Connection::open(DB_FILE) {
-            let _ = conn.pragma_update(None, "busy_timeout", &5000);
+            let _ = conn.pragma_update(None, "busy_timeout", &30000);
             let query = "SELECT worker_id, task, cpu_usage, ram_usage, last_heartbeat 
                          FROM worker_status 
                          WHERE last_heartbeat > datetime('now', '-120 seconds')
@@ -173,7 +173,7 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
         
         // Immediate DB entry for UI feedback
         if let Ok(conn) = Connection::open(DB_FILE) {
-            let _ = conn.pragma_update(None, "busy_timeout", &5000);
+            let _ = conn.pragma_update(None, "busy_timeout", &30000);
             let _ = conn.execute(
                 "INSERT OR REPLACE INTO worker_status (worker_id, task, cpu_usage, ram_usage, last_heartbeat)
                  VALUES (?1, ?2, ?3, ?4, datetime('now'))",
@@ -234,7 +234,7 @@ async fn stop_all(state: Arc<RwLock<HubState>>) {
         }
         
         if let Ok(conn) = Connection::open(DB_FILE) {
-            let _ = conn.pragma_update(None, "busy_timeout", &5000);
+            let _ = conn.pragma_update(None, "busy_timeout", &30000);
             let _ = conn.execute("DELETE FROM worker_status", []);
         }
     }
