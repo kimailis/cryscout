@@ -9,5 +9,5 @@ members = [
     "cryscout_worker_rs",
     "bleichenbacher_fourier",
     "wallet_scout_rs"
-, "kangaroo_rs", "physics_engine_rs", "genotype_rs", "neural_scout_rs"]
+, "kangaroo_rs", "physics_engine_rs", "genotype_rs", "neural_scout_rs", "weak_key_scanner_rs"]
 resolver = "2"

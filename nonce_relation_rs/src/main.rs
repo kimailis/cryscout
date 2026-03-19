@@ -290,7 +290,68 @@ fn main() -> Result<()> {
         }
     }
 
-    // 3. Brute Force Point Ratios O(N^2 * Ratios)
+    // 3. Delta Attack O(N*L) (k_i = k_j + delta)
+    if let Some(q) = target_pubkey {
+        println!("Running Optimized O(N*L) Delta Scan (k_i = k_j + delta)...");
+        let points: Vec<ProjectivePoint> = sigs.par_iter().map(|sig| {
+            let s_inv = sig.s.invert().unwrap();
+            (g * sig.z + q * sig.r) * s_inv
+        }).collect();
+
+        let mut lookup = HashMap::new();
+        for i in 0..points.len() {
+            lookup.insert(points[i].to_encoded_point(true), i);
+        }
+
+        for j in 0..points.len() {
+            for delta in 1..=args.limit {
+                // Check k_i = k_j + delta  => P_i = P_j + delta*G
+                let target_p = points[j] + (g * Scalar::from(delta));
+                if let Some(&i) = lookup.get(&target_p.to_encoded_point(true)) {
+                    if i == j { continue; }
+                    
+                    let s1_inv = sigs[i].s.invert().unwrap();
+                    let s2_inv = sigs[j].s.invert().unwrap();
+                    let delta_s = Scalar::from(delta);
+                    
+                    let num = s2_inv * sigs[j].z - s1_inv * sigs[i].z + delta_s;
+                    let den = s1_inv * sigs[i].r - s2_inv * sigs[j].r;
+                    
+                    if den != Scalar::ZERO {
+                        let d = num * den.invert().unwrap();
+                        if fast_verify(&d, &target_hashes, &target_pubkey) {
+                            println!("!!! SUCCESS !!! Delta found: k_{} = k_{} + {}", i, j, delta);
+                            println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                // Check k_i = k_j - delta => P_i = P_j - delta*G
+                let target_p_neg = points[j] - (g * Scalar::from(delta));
+                if let Some(&i) = lookup.get(&target_p_neg.to_encoded_point(true)) {
+                    if i == j { continue; }
+                    let s1_inv = sigs[i].s.invert().unwrap();
+                    let s2_inv = sigs[j].s.invert().unwrap();
+                    let delta_s = Scalar::from(delta);
+                    
+                    let num = s2_inv * sigs[j].z - s1_inv * sigs[i].z - delta_s;
+                    let den = s1_inv * sigs[i].r - s2_inv * sigs[j].r;
+                    
+                    if den != Scalar::ZERO {
+                        let d = num * den.invert().unwrap();
+                        if fast_verify(&d, &target_hashes, &target_pubkey) {
+                            println!("!!! SUCCESS !!! Delta found: k_{} = k_{} - {}", i, j, delta);
+                            println!("Private Key: 0x{}", hex::encode(d.to_bytes()));
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Brute Force Point Ratios O(N^2 * Ratios)
     if let Some(q) = target_pubkey {
         println!("Running Optimized O(N*L) Point Ratio Scan (a*k_i = b*k_j)...");
         let points: Vec<ProjectivePoint> = sigs.par_iter().map(|sig| {
