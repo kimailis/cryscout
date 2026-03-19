@@ -42,8 +42,8 @@ def extract_from_html(file_path):
                         # This is a heuristic, bitinfo often has Outs at the end
                         pass
             
-            # If balance in [10, 20] and has outgoing transactions
-            if 10.0 <= balance <= 20.0:
+            # If balance > 0
+            if balance > 0:
                 extracted.append({
                     'address': address,
                     'balance': balance,
@@ -76,7 +76,7 @@ def main():
         # but for now we ingest if they meet the balance and are in the dormant list.
         cursor.execute('''
             INSERT OR IGNORE INTO addresses (address, balance, status, potential_weakness, sigs_fetched, sigs_scanned)
-            VALUES (?, ?, 'Dormant', 'Dormant 10y+ (10-20 BTC Range)', 0, 0)
+            VALUES (?, ?, 'Dormant', 'Dormant 10y+ (Historical Target)', 0, 0)
         ''', (t['address'], t['balance']))
         if cursor.rowcount > 0:
             count += 1

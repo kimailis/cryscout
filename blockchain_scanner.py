@@ -26,8 +26,9 @@ def check_address(address):
             data = resp.json()
             balance = data.get('final_balance', 0) / 100000000.0
             total_sent = data.get('total_sent', 0)
-            # Criteria: 10-20 BTC, spent > 0
-            if 10.0 <= balance <= 20.0 and total_sent > 0:
+            
+            # Criteria: Any balance, any activity
+            if total_sent > 0 or balance > 0:
                 # Check dormancy (last transaction > 10 years ago)
                 # Max timestamp for 10 years ago (approx 2016-03-19)
                 max_ts = 1458345600 
@@ -54,7 +55,7 @@ def main():
     found = []
     checked_blocks = set()
     
-    print("Starting blockchain search for 10-20 BTC dormant targets...")
+    print("Starting blockchain search for dormant targets (any balance)...")
     
     while len(found) < 5: # Small test
         h = random.randint(32490, 391000)

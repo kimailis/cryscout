@@ -29,15 +29,10 @@ def check_db_validity():
     if invalid_format:
         print(f"Sample invalid: {invalid_format[:10]}")
     
-    # Check balance mandate (2.0 to 4.0 BTC)
-    cursor.execute("SELECT COUNT(*) FROM addresses WHERE balance >= 2.0 AND balance <= 4.0")
-    mandate_count = cursor.fetchone()[0]
-    print(f"Addresses meeting 2.0-4.0 BTC mandate: {mandate_count}")
-    
+    # All addresses are now valid regardless of balance
     cursor.execute("SELECT COUNT(*) FROM addresses WHERE balance > 0")
     with_balance = cursor.fetchone()[0]
     print(f"Addresses with balance > 0: {with_balance}")
-
     conn.close()
 
 if __name__ == "__main__":

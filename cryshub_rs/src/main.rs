@@ -24,7 +24,9 @@ const INITIAL_RESTART_BACKOFF_SECS: u64 = 5;
 const MAX_RESTART_BACKOFF_SECS: u64 = 300;
 const STARTUP_STAGGER_MS: u64 = 750;
 
-const WORKER_TYPES: &[&str] = &["scanner", "striker", "scouter", "fetcher", "neural_scout", "scorer"];
+const WORKER_TYPES: &[&str] = &["scanner", "striker", "scouter", "fetcher", "neural_scout", "scorer", "weak_key_scanner"];
+
+const DASHBOARD_UPDATE_INTERVAL: u64 = 1;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct WorkerDetail {
@@ -78,6 +80,7 @@ fn worker_status_id(worker_type: &str, pid: u32) -> String {
         "fetcher" => "Fetcher",
         "neural_scout" => "NeuralScout",
         "scorer" => "Scorer",
+        "weak_key_scanner" => "WeakKeyScanner",
         _ => worker_type,
     };
     format!("{}-{}", label, pid)
@@ -305,6 +308,7 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
         "scouter" => "./target/release/wallet_scout_rs",
         "fetcher" => "./target/release/address_analyzer_rs",
         "neural_scout" => "./target/release/neural_scout_rs",
+        "weak_key_scanner" => "./target/release/weak_key_scanner_rs",
         _ => "./target/release/cryscout_worker_rs",
     };
     
