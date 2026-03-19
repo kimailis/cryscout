@@ -1,14 +1,14 @@
 
 use num_bigint::{BigInt, Sign};
-use num_traits::{One, Zero};
+
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use rayon::prelude::*;
 use serde_json::Value;
 use std::f64::consts::PI;
-use num_complex::Complex64;
+
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Signature {
@@ -151,7 +151,7 @@ fn main() {
     }
 }
 
-fn bigint_to_f64(b: &BigInt, n: &BigInt) -> f64 {
+fn bigint_to_f64(b: &BigInt, _n: &BigInt) -> f64 {
     let (sign, bytes) = b.to_bytes_be();
     let mut val = 0.0;
     let mut weight = 1.0;

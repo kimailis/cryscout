@@ -17,8 +17,14 @@ use tokio::time;
 const STATUS_FILE: &str = "service_status.json";
 const SIGNAL_FILE: &str = "service_signal.txt";
 const DB_FILE: &str = "cryscout.db";
+const MAX_CPU_FOR_SPAWN: f32 = 85.0;
+const MAX_RAM_FOR_SPAWN: f64 = 90.0;
+const CRASH_LOOP_UPTIME_SECS: f64 = 60.0;
+const INITIAL_RESTART_BACKOFF_SECS: u64 = 5;
+const MAX_RESTART_BACKOFF_SECS: u64 = 300;
+const STARTUP_STAGGER_MS: u64 = 750;
 
-const WORKER_TYPES: &[&str] = &["scanner", "analyzer", "striker", "scouter", "fetcher", "neural_scout"];
+const WORKER_TYPES: &[&str] = &["scanner", "striker", "scouter", "fetcher", "neural_scout", "scorer"];
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct WorkerDetail {
@@ -49,17 +55,39 @@ struct WorkerInfo {
     started_at: f64,
 }
 
+#[derive(Clone, Default)]
+struct RestartPolicy {
+    consecutive_failures: u32,
+    next_restart_at: f64,
+}
+
 struct HubState {
     workers: HashMap<u32, WorkerInfo>,
+    restart_policy: HashMap<String, RestartPolicy>,
     running: bool,
     log_buffer: Vec<String>,
     system: System,
+}
+
+fn worker_status_id(worker_type: &str, pid: u32) -> String {
+    let label = match worker_type {
+        "scanner" => "Scanner",
+        "analyzer" => "Analyzer",
+        "striker" => "Striker",
+        "scouter" => "Scouter",
+        "fetcher" => "Fetcher",
+        "neural_scout" => "NeuralScout",
+        "scorer" => "Scorer",
+        _ => worker_type,
+    };
+    format!("{}-{}", label, pid)
 }
 
 impl HubState {
     fn new() -> Self {
         Self {
             workers: HashMap::new(),
+            restart_policy: HashMap::new(),
             running: false,
             log_buffer: Vec::new(),
             system: System::new_all(),
@@ -104,13 +132,75 @@ async fn get_worker_details() -> Vec<WorkerDetail> {
     }).await.unwrap_or_default()
 }
 
-async fn handle_worker_stdout(
+fn now_ts() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+fn restart_backoff_secs(consecutive_failures: u32) -> u64 {
+    let exp = consecutive_failures.saturating_sub(1).min(6);
+    let raw = INITIAL_RESTART_BACKOFF_SECS.saturating_mul(1u64 << exp);
+    raw.min(MAX_RESTART_BACKOFF_SECS)
+}
+
+async fn wait_for_spawn_budget(state: Arc<RwLock<HubState>>, worker_type: &str) -> bool {
+    loop {
+        let (running, wait_secs, cpu, ram) = {
+            let mut s = state.write().await;
+            s.system.refresh_cpu_usage();
+            s.system.refresh_memory();
+            let cpu = s.system.global_cpu_info().cpu_usage();
+            let ram = (s.system.used_memory() as f64 / s.system.total_memory() as f64) * 100.0;
+            let running = s.running;
+            let restart_wait = s
+                .restart_policy
+                .get(worker_type)
+                .map(|policy| {
+                    let now = now_ts();
+                    if policy.next_restart_at > now {
+                        (policy.next_restart_at - now).ceil() as u64
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(0);
+            let resource_wait = if cpu > MAX_CPU_FOR_SPAWN || ram > MAX_RAM_FOR_SPAWN {
+                10
+            } else {
+                0
+            };
+            (running, restart_wait.max(resource_wait), cpu, ram)
+        };
+
+        if !running {
+            return false;
+        }
+
+        if wait_secs == 0 {
+            return true;
+        }
+
+        state.write().await.log(format!(
+            "Deferring {} start for {}s due to restart/resource budget (CPU {:.1}%, RAM {:.1}%)",
+            worker_type,
+            wait_secs.min(15),
+            cpu,
+            ram
+        ));
+        time::sleep(Duration::from_secs(wait_secs.min(15))).await;
+    }
+}
+
+async fn handle_worker_stream(
     state: Arc<RwLock<HubState>>,
     pid: u32,
     worker_type: String,
-    mut stdout: tokio::process::ChildStdout,
+    stream_name: &'static str,
+    mut stream: impl tokio::io::AsyncRead + Unpin,
 ) {
-    let mut reader = BufReader::new(&mut stdout);
+    let mut reader = BufReader::new(&mut stream);
     let mut line = String::new();
     loop {
         line.clear();
@@ -119,16 +209,98 @@ async fn handle_worker_stdout(
             Ok(_) => {
                 let text = line.trim();
                 if !text.is_empty() {
-                    state.write().await.log(format!("[{}] {}", worker_type, text));
+                    state.write().await.log(format!("[{}:{}] {}", worker_type, stream_name, text));
                 }
             }
             Err(_) => break,
         }
     }
-    state.write().await.log(format!("Worker {} (PID: {}) stream closed", worker_type, pid));
+    state.write().await.log(format!(
+        "Worker {} (PID: {}) {} stream closed",
+        worker_type, pid, stream_name
+    ));
+}
+
+async fn reap_workers(state: Arc<RwLock<HubState>>) {
+    let mut exited = Vec::new();
+    let mut poll_errors = Vec::new();
+    let should_restart;
+    {
+        let mut s = state.write().await;
+        should_restart = s.running;
+        let now = now_ts();
+        for (&pid, info) in s.workers.iter_mut() {
+            match info._process.try_wait() {
+                Ok(Some(status)) => {
+                    exited.push((pid, info.worker_type.clone(), status.code(), now - info.started_at));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    poll_errors.push((info.worker_type.clone(), pid, e.to_string()));
+                }
+            }
+        }
+
+        for (worker_type, pid, err) in poll_errors {
+            s.log(format!(
+                "Failed to poll worker {} (PID: {}): {}",
+                worker_type, pid, err
+            ));
+        }
+
+        for (pid, worker_type, code, uptime) in &exited {
+            s.workers.remove(pid);
+            let policy = s
+                .restart_policy
+                .entry(worker_type.clone())
+                .or_insert_with(RestartPolicy::default);
+            if *uptime < CRASH_LOOP_UPTIME_SECS {
+                policy.consecutive_failures = policy.consecutive_failures.saturating_add(1);
+                policy.next_restart_at = now + restart_backoff_secs(policy.consecutive_failures) as f64;
+            } else {
+                policy.consecutive_failures = 0;
+                policy.next_restart_at = now;
+            }
+            s.log(format!(
+                "Worker {} (PID: {}) exited with status {:?} after {:.1}s",
+                worker_type, pid, code, uptime
+            ));
+        }
+    }
+
+    if exited.is_empty() {
+        return;
+    }
+
+    if let Ok(conn) = Connection::open(DB_FILE) {
+        let _ = conn.pragma_update(None, "busy_timeout", &30000);
+        for (pid, worker_type, _, _) in &exited {
+            let _ = conn.execute(
+                "DELETE FROM worker_status WHERE worker_id = ?1",
+                params![worker_status_id(worker_type, *pid)],
+            );
+        }
+    }
+
+    if should_restart {
+        for (_, worker_type, _, _) in exited {
+            let state_clone = Arc::clone(&state);
+            let worker_type_clone = worker_type.clone();
+            tokio::spawn(async move {
+                let still_running = state_clone.read().await.running;
+                if still_running {
+                    let _ = start_worker(state_clone, &worker_type_clone).await;
+                }
+            });
+        }
+    }
 }
 
 async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option<u32> {
+    if !wait_for_spawn_budget(Arc::clone(&state), worker_type).await {
+        return None;
+    }
+
     let worker_binary = match worker_type {
         "scouter" => "./target/release/wallet_scout_rs",
         "fetcher" => "./target/release/address_analyzer_rs",
@@ -157,10 +329,18 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
     if pid == 0 { return None; }
 
     let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
     let w_type = worker_type.to_string();
 
     {
         let mut s = state.write().await;
+        s.restart_policy.insert(
+            worker_type.to_string(),
+            RestartPolicy {
+                consecutive_failures: 0,
+                next_restart_at: 0.0,
+            },
+        );
         s.workers.insert(
             pid,
             WorkerInfo {
@@ -177,14 +357,20 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
             let _ = conn.execute(
                 "INSERT OR REPLACE INTO worker_status (worker_id, task, cpu_usage, ram_usage, last_heartbeat)
                  VALUES (?1, ?2, ?3, ?4, datetime('now'))",
-                params![format!("{}-{}", worker_type, pid), "Initializing...", 0.0, 0.0],
+                params![worker_status_id(worker_type, pid), "Initializing...", 0.0, 0.0],
             );
         }
     }
     
     let state_clone = Arc::clone(&state);
+    let w_type_stdout = w_type.clone();
     tokio::spawn(async move {
-        handle_worker_stdout(state_clone, pid, w_type, stdout).await;
+        handle_worker_stream(state_clone, pid, w_type_stdout, "stdout", stdout).await;
+    });
+
+    let state_clone = Arc::clone(&state);
+    tokio::spawn(async move {
+        handle_worker_stream(state_clone, pid, w_type, "stderr", stderr).await;
     });
 
     Some(pid)
@@ -265,11 +451,13 @@ async fn check_signals(state: Arc<RwLock<HubState>>) {
                 
                 let mut s = state.write().await;
                 s.running = true;
+                s.restart_policy.clear();
                 s.log("Spawning fresh worker fleet...".to_string());
                 drop(s);
 
                 for t in WORKER_TYPES {
                     start_worker(Arc::clone(&state), t).await;
+                    time::sleep(Duration::from_millis(STARTUP_STAGGER_MS)).await;
                 }
             }
         }
@@ -290,6 +478,7 @@ async fn main() -> Result<()> {
         loop {
             interval.tick().await;
             check_signals(Arc::clone(&state_clone_bg)).await;
+            reap_workers(Arc::clone(&state_clone_bg)).await;
             update_dashboard_json(Arc::clone(&state_clone_bg)).await;
         }
     });

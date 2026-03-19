@@ -22,6 +22,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sysinfo",
  "tokio",
 ]
 
@@ -1422,6 +1423,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sysinfo",
 ]
 
 [[package]]
@@ -2711,6 +2713,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sysinfo",
  "tiny-bip39",
 ]
 

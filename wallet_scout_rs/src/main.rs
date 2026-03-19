@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+use sysinfo::System;
 use bip39::{Mnemonic, MnemonicType, Language, Seed};
 use rayon::prelude::*;
 use std::io::Write;
@@ -15,7 +16,7 @@ use std::io::Write;
 const DB_FILE: &str = "cryscout.db";
 
 struct ScouterState {
-    targets: HashSet<String>,
+    targets: RwLock<HashSet<String>>,
     checked_count: AtomicU64,
     start_time: Instant,
     live_sample: RwLock<Option<(String, String)>>,
@@ -24,7 +25,7 @@ struct ScouterState {
 fn load_targets() -> Result<HashSet<String>> {
     let conn = Connection::open(DB_FILE)?;
     let _ = conn.pragma_update(None, "busy_timeout", &30000);
-    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE balance >= 20.0")?;
+    let mut stmt = conn.prepare("SELECT address FROM addresses")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut targets = HashSet::new();
     for row in rows {
@@ -53,6 +54,25 @@ fn log_hit(mnemonic: &str, path: &str, address: &str, privkey: &str) -> Result<(
     Ok(())
 }
 
+fn maybe_throttle_for_system_load() {
+    let mut system = System::new_all();
+    system.refresh_cpu_usage();
+    system.refresh_memory();
+    let cpu = system.global_cpu_info().cpu_usage();
+    let ram = (system.used_memory() as f64 / system.total_memory() as f64) * 100.0;
+    let delay = if cpu > 90.0 || ram > 92.0 {
+        Duration::from_secs(8)
+    } else if cpu > 80.0 || ram > 85.0 {
+        Duration::from_secs(3)
+    } else {
+        Duration::from_secs(0)
+    };
+
+    if !delay.is_zero() {
+        std::thread::sleep(delay);
+    }
+}
+
 fn main() -> Result<()> {
     let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
     let targets = load_targets()?;
@@ -62,7 +82,7 @@ fn main() -> Result<()> {
     }
 
     let state = Arc::new(ScouterState {
-        targets,
+        targets: RwLock::new(targets),
         checked_count: AtomicU64::new(0),
         start_time: Instant::now(),
         live_sample: RwLock::new(None),
@@ -77,7 +97,7 @@ fn main() -> Result<()> {
             let diff = current_count - last_count;
             last_count = current_count;
             let kps = diff as f64 / 60.0;
-            let total_elapsed = state_monitor.start_time.elapsed().as_secs();
+            let _total_elapsed = state_monitor.start_time.elapsed().as_secs();
             
             let sample_str = if let Ok(sample) = state_monitor.live_sample.read() {
                 if let Some((m, a)) = &*sample {
@@ -105,6 +125,19 @@ fn main() -> Result<()> {
         }
     });
 
+    let state_refresher = Arc::clone(&state);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(60));
+        match load_targets() {
+            Ok(targets) => {
+                if let Ok(mut current) = state_refresher.targets.write() {
+                    *current = targets;
+                }
+            }
+            Err(e) => eprintln!("[Scouter Refresh] DB Error: {}", e),
+        }
+    });
+
     let secp = Secp256k1::new();
     let network = Network::Bitcoin;
 
@@ -120,6 +153,7 @@ fn main() -> Result<()> {
     let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
 
     loop {
+        maybe_throttle_for_system_load();
         (0..1000).into_par_iter().for_each(|_| {
             let mnemonic = Mnemonic::new(MnemonicType::Words12, Language::English);
             let seed = Seed::new(&mnemonic, "");
@@ -146,7 +180,12 @@ fn main() -> Result<()> {
                     sampled_addr = addr_str.clone();
                 }
 
-                if state.targets.contains(&addr_str) {
+                let is_target = state
+                    .targets
+                    .read()
+                    .map(|targets| targets.contains(&addr_str))
+                    .unwrap_or(false);
+                if is_target {
                     let _ = log_hit(mnemonic.phrase(), path_str, &addr_str, &hex::encode(secret_key.secret_bytes()));
                 }
             }

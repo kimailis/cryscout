@@ -152,7 +152,7 @@ fn bkz(basis: &mut Matrix, block_size: usize, delta: f64) {
         changed = false;
         passes += 1;
         for i in 0..n-1 {
-            let h = std::cmp::min(i + block_size, n);
+            let _h = std::cmp::min(i + block_size, n);
             // In a full BKZ, we'd solve SVP in the local block.
             // Here we use a stronger LLL pass or simple enumeration heuristic.
             lll(basis, delta); 
