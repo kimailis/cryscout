@@ -18,10 +18,10 @@ def check_validity():
         print(f"\nStats for addresses with balance > 0:")
         print(f"Min: {stats[0]}, Max: {stats[1]}, Avg: {stats[2]}, Count: {stats[3]}")
 
-        # Check mandate compliance (2.0 to 4.0 BTC)
-        cursor.execute("SELECT COUNT(*) FROM addresses WHERE balance >= 2.0 AND balance <= 4.0")
-        mandate_count = cursor.fetchone()[0]
-        print(f"\nMandate compliance (2.0 to 4.0 BTC): {mandate_count} addresses")
+        # Check address count
+        cursor.execute("SELECT COUNT(*) FROM addresses")
+        total_count = cursor.fetchone()[0]
+        print(f"\nTotal addresses in system: {total_count}")
 
         # Check total addresses
         cursor.execute("SELECT COUNT(*) FROM addresses")
