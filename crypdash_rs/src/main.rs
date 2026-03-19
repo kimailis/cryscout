@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use chrono::Local;
+use anyhow::{Result};
+
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -21,6 +21,7 @@ use regex::Regex;
 const DB_PATH: &str = "cryscout.db";
 const STATUS_FILE: &str = "service_status.json";
 const SIGNAL_FILE: &str = "service_signal.txt";
+const HEARTBEAT_FRESHNESS_SECS: f64 = 15.0;
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 struct WorkerDetail {
@@ -112,7 +113,21 @@ impl App {
         }
     }
 
+    fn is_pid_alive(&self, pid: u32) -> bool {
+        if pid == 0 {
+            return false;
+        }
+        if let Ok(status) = fs::read_to_string(format!("/proc/{}/status", pid)) {
+            return !status.contains("State:\tZ");
+        }
+        false
+    }
+
     fn is_hub_alive(&self) -> bool {
+        if self.is_pid_alive(self.status.pid) {
+            return true;
+        }
+
         // Use pgrep -x to find the exact binary name
         let output = std::process::Command::new("pgrep")
             .arg("-x")
@@ -134,6 +149,14 @@ impl App {
             }
         }
         false
+    }
+
+    fn has_fresh_status(&self) -> bool {
+        if self.status.last_heartbeat <= 0.0 {
+            return false;
+        }
+        let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
+        now - self.status.last_heartbeat <= HEARTBEAT_FRESHNESS_SECS
     }
 
     fn send_signal(&self, sig: &str) -> Result<()> {
@@ -165,11 +188,17 @@ impl App {
             }
         }
         
-        if !self.is_hub_alive() {
-            self.status.last_update = "".to_string(); // Force OFFLINE display
+        if !self.is_hub_alive() || !self.has_fresh_status() {
+            self.status.last_update = "".to_string();
+            self.status.running = false;
+            self.status.worker_count = 0;
+            self.status.workers_detailed.clear();
         }
 
         self.stats = self.get_db_stats()?;
+        if !self.status.running {
+            self.stats.active_workers = 0;
+        }
         self.potential_targets = self.get_potential_targets()?;
         let (keys, total_btc) = self.get_recovered_keys()?;
         self.recovered_keys = keys;
@@ -302,7 +331,7 @@ fn ui(f: &mut Frame, app: &App) {
         AppMode::Attacks => draw_attacks_view(f, app, chunks[1]),
         AppMode::Scout => draw_scout_view(f, app, chunks[1]),
     }
-    let footer_text = " [Q] Quit | [Tab] Cycle | [R] START/RESTART ALL | [X] STOP ALL WORKERS ";
+    let footer_text = " [Q] Quit | [Tab] Cycle | [R] START/RESTART FLEET | [X] STOP HUB/FLEET ";
     let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)).alignment(Alignment::Center);
     f.render_widget(footer, chunks[2]);
 }

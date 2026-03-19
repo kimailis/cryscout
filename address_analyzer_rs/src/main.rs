@@ -4,11 +4,14 @@ use rand::seq::SliceRandom;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use sysinfo::System;
 use tokio::sync::Semaphore;
 use tokio::time::{sleep, Duration};
 
 const DB_FILE: &str = "cryscout.db";
+const HEARTBEAT_SECS: u64 = 60;
+const MAX_FETCH_PARALLELISM: usize = 10;
 
 const USER_AGENTS: &[&str] = &[
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
@@ -128,7 +131,7 @@ fn get_real_z_legacy(tx: &MempoolTx, vin_index: usize) -> Result<String> {
 }
 
 fn get_real_z_segwit(tx: &MempoolTx, vin_index: usize) -> Result<String> {
-    let mut version = tx.version.to_le_bytes().to_vec();
+    let version = tx.version.to_le_bytes().to_vec();
     
     let mut prevouts_raw = Vec::new();
     for vin in &tx.vin {
@@ -253,12 +256,62 @@ async fn fetch_tx_data(client: &reqwest::Client, txid: &str) -> Result<MempoolTx
     Ok(resp)
 }
 
+fn update_worker_status(task: &str) {
+    if let Ok(conn) = Connection::open(DB_FILE) {
+        let _ = conn.pragma_update(None, "busy_timeout", &30000);
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO worker_status (worker_id, task, cpu_usage, ram_usage, last_heartbeat)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+            params![format!("Fetcher-{}", std::process::id()), task, 0.0, 0.0],
+        );
+    }
+}
+
+fn current_resource_profile() -> (f32, f64) {
+    let mut system = System::new_all();
+    system.refresh_cpu_usage();
+    system.refresh_memory();
+    let cpu = system.global_cpu_info().cpu_usage();
+    let ram = (system.used_memory() as f64 / system.total_memory() as f64) * 100.0;
+    (cpu, ram)
+}
+
+fn recommended_fetch_parallelism() -> usize {
+    let (cpu, ram) = current_resource_profile();
+    if cpu > 85.0 || ram > 90.0 {
+        2
+    } else if cpu > 70.0 || ram > 80.0 {
+        4
+    } else {
+        MAX_FETCH_PARALLELISM
+    }
+}
+
+async fn throttle_for_system_load(task_state: &Arc<RwLock<String>>) {
+    let (cpu, ram) = current_resource_profile();
+    let delay = if cpu > 90.0 || ram > 92.0 {
+        Duration::from_secs(10)
+    } else if cpu > 80.0 || ram > 85.0 {
+        Duration::from_secs(4)
+    } else {
+        Duration::from_secs(0)
+    };
+
+    if !delay.is_zero() {
+        if let Ok(mut task) = task_state.write() {
+            *task = format!("Fetcher throttling for load (CPU {:.1}%, RAM {:.1}%)", cpu, ram);
+        }
+        sleep(delay).await;
+    }
+}
+
 async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc<Semaphore>) -> Result<Vec<ExtractedSig>> {
     let _permit = sem.acquire().await?;
     println!("[INFO] Analyzing address: {}", address);
 
     let mut all_extracted = Vec::new();
     let mut last_txid = None;
+    let mut consecutive_errors = 0u8;
     
     loop {
         let url = if let Some(txid) = &last_txid {
@@ -274,8 +327,14 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
                 sleep(Duration::from_secs(10)).await;
                 continue;
             }
-            break;
+            if resp.status().is_server_error() && consecutive_errors < 5 {
+                consecutive_errors += 1;
+                sleep(Duration::from_secs(5 * consecutive_errors as u64)).await;
+                continue;
+            }
+            return Err(anyhow!("address fetch failed for {} with status {}", address, resp.status()));
         }
+        consecutive_errors = 0;
         let txs = resp.json::<Vec<MempoolTx>>().await?;
         if txs.is_empty() { break; }
         println!("[DEBUG] Fetched {} transactions for {}", txs.len(), address);
@@ -357,10 +416,25 @@ async fn analyze_address(client: Arc<reqwest::Client>, address: String, sem: Arc
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("[START] Address Analyzer Service started.");
+    let task_state = Arc::new(RwLock::new("Fetcher idle".to_string()));
+
+    let task_state_heartbeat = Arc::clone(&task_state);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
+        loop {
+            interval.tick().await;
+            let task = task_state_heartbeat
+                .read()
+                .map(|s| s.clone())
+                .unwrap_or_else(|_| "Fetcher heartbeat unavailable".to_string());
+            update_worker_status(&task);
+        }
+    });
     
     loop {
+        throttle_for_system_load(&task_state).await;
         let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &30000);
+        let _ = conn.pragma_update(None, "busy_timeout", &30000);
         
         // 1. Identify vulnerable addresses from DB
         let mut stmt = conn.prepare("
@@ -371,10 +445,9 @@ async fn main() -> Result<()> {
             OR status = 'Target'
             OR transactions > 0)
             AND (sigs_fetched = 0 OR sigs_fetched IS NULL)
-            AND balance >= 20.0
             ORDER BY transactions DESC, balance DESC
             LIMIT 50
-        ")?;
+            ")?;
         
         let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?
             .flatten()
@@ -382,14 +455,33 @@ async fn main() -> Result<()> {
 
         if addresses.is_empty() {
             println!("[INFO] No new target addresses to analyze. Sleeping...");
+            if let Ok(mut task) = task_state.write() {
+                *task = "Fetcher idle".to_string();
+            }
             sleep(Duration::from_secs(60)).await;
             continue;
         }
 
         println!("[START] Found {} target addresses to analyze.", addresses.len());
+        if let Ok(mut task) = task_state.write() {
+            *task = format!("Fetching signatures for {} addresses", addresses.len());
+        }
 
-        let client = Arc::new(reqwest::Client::new());
-        let sem = Arc::new(Semaphore::new(3)); // Rate limiting
+        let client = Arc::new(
+            reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(30))
+                .build()?,
+        );
+        let parallelism = recommended_fetch_parallelism();
+        if let Ok(mut task) = task_state.write() {
+            *task = format!(
+                "Fetching signatures for {} addresses (parallelism {})",
+                addresses.len(),
+                parallelism
+            );
+        }
+        let sem = Arc::new(Semaphore::new(parallelism));
         
         let mut tasks = Vec::new();
         for addr in addresses {
@@ -405,19 +497,28 @@ async fn main() -> Result<()> {
         let mut total_sigs = 0;
         for res in results {
             if let Ok((addr, Ok(sigs))) = res {
-                if sigs.is_empty() { 
-                    // Still mark as fetched even if 0 sigs found, to avoid retrying immediately
+                if sigs.is_empty() {
+                    eprintln!("[INFO] No usable signatures extracted for {}. Leaving address retryable.", addr);
                     let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &30000);
-                    let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
-                    continue; 
+                    let _ = conn.pragma_update(None, "busy_timeout", &30000);
+                    let _ = conn.execute(
+                        "UPDATE addresses
+                         SET sigs_fetched = 0,
+                             sigs_scanned = 0,
+                             vulnerability_score = 0,
+                             potential_weakness = 'Insufficient signature data',
+                             rank = NULL
+                         WHERE address = ?1",
+                        params![addr],
+                    );
+                    continue;
                 }
                 println!("[SUCCESS] Extracted {} sigs for {}", sigs.len(), addr);
                 total_sigs += sigs.len();
                 
                 // Save to DB
                 let conn = Connection::open(DB_FILE)?;
-    let _ = conn.pragma_update(None, "busy_timeout", &30000);
+                let _ = conn.pragma_update(None, "busy_timeout", &30000);
                 for sig in sigs {
                     use num_bigint::BigInt;
                     use num_traits::Num;
@@ -431,11 +532,22 @@ async fn main() -> Result<()> {
                     );
                 }
                 // Mark address as sigs_fetched
-                let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
+                let _ = conn.execute(
+                    "UPDATE addresses
+                     SET sigs_fetched = 1,
+                         sigs_scanned = 0
+                     WHERE address = ?1",
+                    params![addr],
+                );
+            } else if let Ok((addr, Err(e))) = res {
+                eprintln!("[WARN] Failed to analyze {}: {}", addr, e);
             }
         }
 
         println!("[FINISH] Collected total of {} signatures. Sleeping...", total_sigs);
+        if let Ok(mut task) = task_state.write() {
+            *task = format!("Fetcher sleeping after collecting {} signatures", total_sigs);
+        }
         sleep(Duration::from_secs(60)).await;
     }
 }

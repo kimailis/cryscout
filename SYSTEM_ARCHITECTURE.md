@@ -6,7 +6,7 @@ CryScout is a high-performance, distributed cryptanalytic suite designed to iden
 The primary objective of CryScout is to discover compromised wallets resulting from weak Random Number Generators (RNGs) used during transaction signing or wallet generation, thereby exposing the private key.
 
 ### 1.1 The "Real Data" Mandate
-CryScout operates under a strict "Real Data Only" mandate. No simulated, fictional, or artificially generated target addresses are processed. Every address targeted by the system is mathematically verified to exist on the live Bitcoin blockchain and strictly enforces a minimum active balance requirement of $\ge 20 \text{ BTC}$.
+CryScout operates under a strict "Real Data Only" mandate. No simulated, fictional, or artificially generated target addresses are processed. Every address targeted by the system is mathematically verified to exist on the live Bitcoin blockchain and strictly enforces an active balance requirement of 2.0 to 4.0 BTC.
 
 ---
 
@@ -54,7 +54,7 @@ CryScout reformulates this into a Closest Vector Problem (CVP) and solves it usi
 - **`cryscout_worker_rs`**: A multi-mode worker:
     - **Scanner**: replenishes the target queue from dormant candidates.
     - **Analyzer**: Computes statistical features for target scoring.
-    - **Scorer**: Enforces $\ge 20 \text{ BTC}$ requirement and prioritizes "Easy Targets" (flawed PRNG signatures).
+    - **Scorer**: Enforces 2.0 to 4.0 BTC requirement and prioritizes "Easy Targets" (flawed PRNG signatures).
     - **Striker**: Executes the 6-stage Precision Strike sequence.
 - **`address_analyzer_rs` (Fetcher)**: Extracts transaction signatures from the live blockchain via Mempool API. Optimized to ignore irrelevant low-balance addresses.
 - **`wallet_scout_rs` (Global Scouter)**: High-speed mnemonic bruteforcer. Optimized for 2-core systems (single-thread mode) and focused strictly on Legacy (`1...`) and P2SH (`3...`) targets.

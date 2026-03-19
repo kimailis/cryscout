@@ -77,7 +77,7 @@ impl Kangaroo {
 
         // Wild Kangaroos
         println!("[*] Releasing {} wild kangaroos...", self.num_wild);
-        (0..self.num_wild).into_par_iter().for_each(|i| {
+        (0..self.num_wild).into_par_iter().for_each(|_i| {
             let mut dist = BigInt::from(0);
             let mut current_point = self.pubkey - (g * bigint_to_scalar(&self.lower));
             

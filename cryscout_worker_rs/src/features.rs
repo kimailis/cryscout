@@ -1,6 +1,7 @@
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Signed};
 use std::collections::HashMap;
+use std::f64::consts::PI;
 
 pub struct SigData {
     pub r: BigInt,
@@ -61,15 +62,34 @@ impl ScoringFeatures {
         let short_nonces = r_values.iter().filter(|r| r.bits() < 256).count();
         let msb_bias = short_nonces as f64 / n as f64;
 
-        // 5. FFT Peak (Simplified)
+        // 5. FFT Peak (Real FFT implementation)
         let mut fft_peak_score = 0.0;
         if n >= 4 {
+            let mut planner = rustfft::FftPlanner::new();
+            let fft_size = n.next_power_of_two();
+            let mut samples: Vec<rustfft::num_complex::Complex<f64>> = vec![rustfft::num_complex::Complex::new(0.0, 0.0); fft_size];
+            
             let bit_lens: Vec<f64> = r_values.iter().map(|r| r.bits() as f64).collect();
             let mean = bit_lens.iter().sum::<f64>() / n as f64;
-            let var = bit_lens.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
-            if var > 0.1 {
-                fft_peak_score = (var / 100.0).min(1.0); // Proxy for now
+            
+            for i in 0..n {
+                samples[i].re = bit_lens[i] - mean;
             }
+            
+            let fft = planner.plan_fft_forward(fft_size);
+            fft.process(&mut samples);
+            
+            // Look for significant peaks in the magnitude spectrum (excluding DC at index 0)
+            let mut max_mag = 0.0;
+            for i in 1..fft_size / 2 {
+                let mag = samples[i].norm();
+                if mag > max_mag {
+                    max_mag = mag;
+                }
+            }
+            
+            // Normalize peak score: a very strong periodic component indicates non-randomness
+            fft_peak_score = (max_mag / (n as f64 * 10.0)).min(1.0);
         }
 
         // 6. Time Correlation (delta_t vs delta_r)
@@ -142,7 +162,7 @@ impl ScoringFeatures {
     }
 
     fn calc_entropy(values: &[BigInt]) -> f64 {
-        let n = values.len();
+        let _n = values.len();
         let mut counts = HashMap::new();
         for v in values {
             let bytes = v.to_bytes_be().1;
@@ -201,6 +221,21 @@ pub struct NonceFeatures {
 }
 
 impl NonceFeatures {
+    fn normalized_entropy(counts: &[u32], total: usize) -> f32 {
+        if total == 0 {
+            return 0.0;
+        }
+
+        let mut entropy = 0.0f32;
+        for &count in counts {
+            if count > 0 {
+                let p = count as f32 / total as f32;
+                entropy -= p * p.log2();
+            }
+        }
+        entropy / 8.0
+    }
+
     pub fn extract_neural_features(r_values: &[BigInt]) -> Option<Vec<f32>> {
         let n = r_values.len();
         if n < 2 { return None; }
@@ -316,9 +351,43 @@ impl NonceFeatures {
             }
         }
 
-        // FFT (simplified like in bias_detector_rs)
-        features.extend(vec![0.0; 32]); 
-        features.extend(vec![0.0; 32]); 
+        let spectral_input: Vec<f64> = r_bytes.iter().map(|b| {
+            let mut acc = 0u64;
+            for byte in b.iter().take(8) {
+                acc = (acc << 8) | (*byte as u64);
+            }
+            acc as f64
+        }).collect();
+        if !spectral_input.is_empty() {
+            let mean = spectral_input.iter().sum::<f64>() / spectral_input.len() as f64;
+            let centered: Vec<f64> = spectral_input.iter().map(|v| v - mean).collect();
+            for k in 0..32 {
+                if k < centered.len() {
+                    let mut real = 0.0;
+                    let mut imag = 0.0;
+                    for (idx, value) in centered.iter().enumerate() {
+                        let angle = 2.0 * PI * (k as f64) * (idx as f64) / centered.len() as f64;
+                        real += value * angle.cos();
+                        imag -= value * angle.sin();
+                    }
+                    let magnitude = (real * real + imag * imag).sqrt();
+                    let normalized = (magnitude / centered.len() as f64).ln_1p() / 32.0;
+                    features.push(normalized.min(1.0) as f32);
+                } else {
+                    features.push(0.0);
+                }
+            }
+        } else {
+            features.extend(vec![0.0; 32]);
+        }
+
+        for i in 0..32 {
+            let mut counts = [0u32; 256];
+            for b in &r_bytes {
+                counts[b[31 - i] as usize] += 1;
+            }
+            features.push(Self::normalized_entropy(&counts, n));
+        }
 
         while features.len() < 438 {
             features.push(0.0);
@@ -454,11 +523,49 @@ impl NonceFeatures {
         }
 
         // 8. FFT magnitude (32 features)
-        // Simplified: use bit lengths variance as signal
-        features.extend(vec![0.0; 32]); // FFT implementation omitted for brevity but can be added
+        if n >= 4 {
+            let mut planner = rustfft::FftPlanner::new();
+            let fft_size = n.next_power_of_two();
+            let mut samples: Vec<rustfft::num_complex::Complex<f64>> = vec![rustfft::num_complex::Complex::new(0.0, 0.0); fft_size];
+            
+            let bit_lens: Vec<f64> = r_values.iter().map(|r| r.bits() as f64).collect();
+            let mean = bit_lens.iter().sum::<f64>() / n as f64;
+            
+            for i in 0..n {
+                samples[i].re = bit_lens[i] - mean;
+            }
+            
+            let fft = planner.plan_fft_forward(fft_size);
+            fft.process(&mut samples);
+            
+            for i in 0..32 {
+                if i < fft_size / 2 {
+                    let mag = samples[i].norm();
+                    features.push((mag / (n as f64 * 10.0)).min(1.0));
+                } else {
+                    features.push(0.0);
+                }
+            }
+        } else {
+            features.extend(vec![0.0; 32]);
+        }
 
-        // 9. Reverse Entropy (32 features) - Simplified
-        features.extend(vec![0.0; 32]);
+        // 9. Reverse Entropy (32 features)
+        for i in 0..32 {
+            let mut counts = [0u32; 256];
+            for b in &r_bytes {
+                // Look at entropy from the LSB side
+                counts[b[31 - i] as usize] += 1;
+            }
+            let mut ent = 0.0;
+            for count in counts {
+                if count > 0 {
+                    let p = count as f64 / n as f64;
+                    ent -= p * p.log2();
+                }
+            }
+            features.push(ent / 8.0);
+        }
 
         // Pad to exactly 438
         while features.len() < 438 {

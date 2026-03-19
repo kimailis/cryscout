@@ -3,7 +3,7 @@ use clap::Parser;
 use k256::elliptic_curve::sec1::{ToEncodedPoint, FromEncodedPoint};
 use k256::elliptic_curve::PrimeField;
 use k256::{ProjectivePoint, Scalar, NonZeroScalar};
-use num_bigint::{BigInt, Sign};
+use num_bigint::{BigInt};
 use num_integer::Integer;
 use num_traits::{Num, One, Zero};
 use ripemd::{Digest as RipemdDigest, Ripemd160};
