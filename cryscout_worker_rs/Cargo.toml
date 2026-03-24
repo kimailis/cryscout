@@ -35,3 +35,9 @@ libc = "0.2"
 ort = "=2.0.0-rc.1"
 ort-sys = "=2.0.0-rc.1"
 ndarray = "0.15"
+
+[profile.release]
+lto = false
+debug = false
+panic = 'abort'
+incremental = false

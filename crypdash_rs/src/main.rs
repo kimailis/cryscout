@@ -212,11 +212,11 @@ impl App {
         conn.busy_timeout(Duration::from_secs(30))?;
         let mut stats = Stats::default();
         stats.total = conn.query_row("SELECT COUNT(*) FROM addresses", [], |r| r.get(0)).unwrap_or(0);
-        stats.analyzed = conn.query_row("SELECT COUNT(*) FROM addresses WHERE sigs_scanned = 1", [], |r| r.get(0)).unwrap_or(0);
+        stats.analyzed = conn.query_row("SELECT COUNT(*) FROM addresses WHERE analyzed = 1", [], |r| r.get(0)).unwrap_or(0);
         stats.dormant = conn.query_row("SELECT COUNT(*) FROM addresses WHERE status = 'Dormant'", [], |r| r.get(0)).unwrap_or(0);
         stats.vulnerabilities = conn.query_row("SELECT COUNT(*) FROM vulnerabilities", [], |r| r.get(0)).unwrap_or(0);
         stats.keys_recovered = conn.query_row("SELECT COUNT(*) FROM recovered_keys", [], |r| r.get(0)).unwrap_or(0);
-        stats.attacked = conn.query_row("SELECT COUNT(*) FROM addresses WHERE sigs_scanned = 1", [], |r| r.get(0)).unwrap_or(0);
+        stats.attacked = conn.query_row("SELECT COUNT(*) FROM addresses WHERE analyzed = 1", [], |r| r.get(0)).unwrap_or(0);
         stats.active_workers = conn.query_row("SELECT COUNT(*) FROM worker_status WHERE last_heartbeat > datetime('now', '-120 seconds')", [], |r| r.get(0)).unwrap_or(0);
         stats.scouter_checked = conn.query_row("SELECT value_i FROM global_stats WHERE key = 'scouter_checked'", [], |r| r.get(0)).unwrap_or(0);
         
@@ -237,6 +237,17 @@ impl App {
             let entry = addr_probs.entry(addr.clone()).or_insert(1.0);
             let mut p = 0.00001;
             if v_type.contains("R-Reuse") { p = if v_details.contains("Different Z") { 0.99 } else { 0.005 }; }
+            else if v_type.contains("Lattice") || v_type.contains("HNP") { p = 0.95; }
+            else if v_type.contains("Fourier") || v_type.contains("Spectral") { p = 0.70; }
+            else if v_type.contains("Neural") || v_type.contains("Anomaly") {
+                // Extract P(vulnerable) from details like "P(vulnerable)=0.9923 — ..."
+                p = if let Some(start) = v_details.find("P(vulnerable)=") {
+                    v_details[start + 15..].split(|c: char| !c.is_ascii_digit() && c != '.').next()
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .map(|score| if score > 0.9 { 0.60 } else if score > 0.7 { 0.40 } else { 0.15 })
+                        .unwrap_or(0.40)
+                } else { 0.40 };
+            }
             else if v_type.contains("Small R") { p = if v_sev == "High" { 0.01 } else { 0.002 }; }
             else if v_type.contains("LSB Bias") { p = if v_sev == "High" { 0.005 } else { 0.001 }; }
             *entry *= 1.0 - p;
@@ -303,7 +314,7 @@ impl App {
             if lower.contains("fourier") || lower.contains("fft") || lower.contains("bias") || lower.contains("anomaly") || lower.contains("hit") || lower.contains("strike") || lower.contains("relation") || lower.contains("lattice") {
                 reports.push(AttackReport {
                     address: current_line_addr.unwrap_or_else(|| last_addr.clone()),
-                    method: if lower.contains("fourier") { "Fourier" } else if lower.contains("fft") { "FFT/Spectral" } else if lower.contains("anomaly") { "Neural" } else if lower.contains("relation") { "Nonce Rel" } else if lower.contains("lattice") { "Lattice" } else { "Strike" }.to_string(),
+                    method: if lower.contains("fourier") { "Fourier" } else if lower.contains("fft") || lower.contains("spectral") { "Spectral" } else if lower.contains("anomaly") || lower.contains("neural") { "Neural" } else if lower.contains("relation") { "Nonce Rel" } else if lower.contains("lattice") || lower.contains("lll") { "Lattice" } else { "Strike" }.to_string(),
                     details: log.split(']').last().unwrap_or(log).trim().to_string(),
                     severity: if lower.contains("!") || lower.contains("high") || lower.contains("hit") { "High".to_string() } else { "Info".to_string() },
                 });

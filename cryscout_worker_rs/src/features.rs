@@ -142,13 +142,14 @@ impl ScoringFeatures {
         }
 
         // 2. Check for low-entropy/Short nonces
+        // Require sufficient sample size — entropy measurement is unreliable with few sigs
         let r_entropy = Self::calc_entropy(r_vals);
-        if r_entropy < 0.92 {
+        if n >= 20 && r_entropy < 0.92 {
             return "Early OpenSSL/Brainwallet (Low Entropy)".to_string();
         }
 
         let short_nonces = r_vals.iter().filter(|r| r.bits() < 248).count();
-        if short_nonces as f64 / n as f64 > 0.2 {
+        if n >= 10 && short_nonces as f64 / n as f64 > 0.2 {
             return "Old Wallet (Short Nonces)".to_string();
         }
 
