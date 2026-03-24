@@ -17,14 +17,19 @@ use tokio::time;
 const STATUS_FILE: &str = "service_status.json";
 const SIGNAL_FILE: &str = "service_signal.txt";
 const DB_FILE: &str = "cryscout.db";
-const MAX_CPU_FOR_SPAWN: f32 = 85.0;
-const MAX_RAM_FOR_SPAWN: f64 = 90.0;
+const MAX_CPU_FOR_SPAWN: f32 = 70.0;
+const MAX_RAM_FOR_SPAWN: f64 = 85.0;
+const GLOBAL_CPU_CAP: f32 = 85.0;
+const RESTART_CPU_THRESHOLD: f32 = 70.0;
+const LOW_PRIORITY_WORKERS: &[&str] = &["scouter", "neural_scout", "weak_key_scanner", "treasure_hunter", "brainwallet"];
+
 const CRASH_LOOP_UPTIME_SECS: f64 = 60.0;
 const INITIAL_RESTART_BACKOFF_SECS: u64 = 5;
 const MAX_RESTART_BACKOFF_SECS: u64 = 300;
-const STARTUP_STAGGER_MS: u64 = 750;
+const STARTUP_STAGGER_MS: u64 = 1000;
 
-const WORKER_TYPES: &[&str] = &["scanner", "striker", "scouter", "fetcher", "neural_scout", "scorer", "weak_key_scanner"];
+// Note: fetcher and treasure_hunter managed manually to control API rate limits
+const WORKER_TYPES: &[&str] = &["scanner", "analyzer", "striker", "scouter"];
 
 const DASHBOARD_UPDATE_INTERVAL: u64 = 1;
 
@@ -61,14 +66,17 @@ struct WorkerInfo {
 struct RestartPolicy {
     consecutive_failures: u32,
     next_restart_at: f64,
+    suspended: bool,
+    suspended_at: f64,
 }
+
+const SUSPEND_COOLDOWN_SECS: f64 = 120.0;
 
 struct HubState {
     workers: HashMap<u32, WorkerInfo>,
     restart_policy: HashMap<String, RestartPolicy>,
     running: bool,
     log_buffer: Vec<String>,
-    system: System,
 }
 
 fn worker_status_id(worker_type: &str, pid: u32) -> String {
@@ -81,6 +89,8 @@ fn worker_status_id(worker_type: &str, pid: u32) -> String {
         "neural_scout" => "NeuralScout",
         "scorer" => "Scorer",
         "weak_key_scanner" => "WeakKeyScanner",
+        "treasure_hunter" => "TreasureHunter",
+        "brainwallet" => "BrainWallet",
         _ => worker_type,
     };
     format!("{}-{}", label, pid)
@@ -91,9 +101,8 @@ impl HubState {
         Self {
             workers: HashMap::new(),
             restart_policy: HashMap::new(),
-            running: false,
+            running: true,
             log_buffer: Vec::new(),
-            system: System::new_all(),
         }
     }
 
@@ -149,32 +158,39 @@ fn restart_backoff_secs(consecutive_failures: u32) -> u64 {
 }
 
 async fn wait_for_spawn_budget(state: Arc<RwLock<HubState>>, worker_type: &str) -> bool {
+    let mut system = System::new_all();
     loop {
-        let (running, wait_secs, cpu, ram) = {
-            let mut s = state.write().await;
-            s.system.refresh_cpu_usage();
-            s.system.refresh_memory();
-            let cpu = s.system.global_cpu_info().cpu_usage();
-            let ram = (s.system.used_memory() as f64 / s.system.total_memory() as f64) * 100.0;
+        let (running, wait_secs, _cpu, _ram) = {
+            let s = state.read().await;
+            system.refresh_cpu_usage();
+            system.refresh_memory();
+            let cpu = system.global_cpu_info().cpu_usage();
+            let ram = (system.used_memory() as f64 / system.total_memory() as f64) * 100.0;
             let running = s.running;
-            let restart_wait = s
-                .restart_policy
-                .get(worker_type)
-                .map(|policy| {
-                    let now = now_ts();
-                    if policy.next_restart_at > now {
-                        (policy.next_restart_at - now).ceil() as u64
-                    } else {
-                        0
-                    }
-                })
-                .unwrap_or(0);
-            let resource_wait = if cpu > MAX_CPU_FOR_SPAWN || ram > MAX_RAM_FOR_SPAWN {
-                10
+            
+            let suspended = s.restart_policy.get(worker_type).map(|p| p.suspended).unwrap_or(false);
+            if suspended {
+                (running, 10, cpu, ram)
             } else {
-                0
-            };
-            (running, restart_wait.max(resource_wait), cpu, ram)
+                let restart_wait = s
+                    .restart_policy
+                    .get(worker_type)
+                    .map(|policy| {
+                        let now = now_ts();
+                        if policy.next_restart_at > now {
+                            (policy.next_restart_at - now).ceil() as u64
+                        } else {
+                            0
+                        }
+                    })
+                    .unwrap_or(0);
+                let resource_wait = if cpu > MAX_CPU_FOR_SPAWN || ram > MAX_RAM_FOR_SPAWN {
+                    10
+                } else {
+                    0
+                };
+                (running, restart_wait.max(resource_wait), cpu, ram)
+            }
         };
 
         if !running {
@@ -185,14 +201,68 @@ async fn wait_for_spawn_budget(state: Arc<RwLock<HubState>>, worker_type: &str) 
             return true;
         }
 
-        state.write().await.log(format!(
-            "Deferring {} start for {}s due to restart/resource budget (CPU {:.1}%, RAM {:.1}%)",
-            worker_type,
-            wait_secs.min(15),
-            cpu,
-            ram
-        ));
-        time::sleep(Duration::from_secs(wait_secs.min(15))).await;
+        time::sleep(Duration::from_secs(wait_secs.min(10))).await;
+    }
+}
+
+async fn monitor_resource_budget(state: Arc<RwLock<HubState>>) {
+    let mut interval = time::interval(Duration::from_secs(2));
+    let mut system = System::new_all();
+    loop {
+        interval.tick().await;
+        
+        system.refresh_cpu_usage();
+        let cpu = system.global_cpu_info().cpu_usage();
+
+        let mut s = state.write().await;
+        if !s.running { continue; }
+
+        if cpu > GLOBAL_CPU_CAP {
+            // Find a low priority worker to stop
+            let to_stop = s.workers.iter()
+                .find(|(_, info)| LOW_PRIORITY_WORKERS.contains(&info.worker_type.as_str()))
+                .map(|(pid, info)| (*pid, info.worker_type.clone()));
+
+            if let Some((pid, w_type)) = to_stop {
+                s.log(format!("CPU OVER LOAD ({:.1}% > {:.1}%). Suspending low-priority worker {} (PID: {})", cpu, GLOBAL_CPU_CAP, w_type, pid));
+                let status_id = worker_status_id(&w_type, pid);
+                if let Some(mut info) = s.workers.remove(&pid) {
+                    let _ = info._process.kill().await;
+                    let policy = s.restart_policy.entry(w_type).or_insert_with(RestartPolicy::default);
+                    policy.suspended = true;
+                    policy.suspended_at = now_ts();
+                }
+                // Clean up DB worker_status entry for the killed worker
+                if let Ok(conn) = Connection::open(DB_FILE) {
+                    let _ = conn.pragma_update(None, "busy_timeout", &5000);
+                    let _ = conn.execute(
+                        "DELETE FROM worker_status WHERE worker_id = ?1",
+                        params![status_id],
+                    );
+                }
+            }
+        } else if cpu < RESTART_CPU_THRESHOLD {
+            // Check if we can resume a suspended worker (with cooldown to prevent thrashing)
+            let now = now_ts();
+            let to_resume = s.restart_policy.iter_mut()
+                .find(|(_, p)| p.suspended && (now - p.suspended_at) >= SUSPEND_COOLDOWN_SECS)
+                .map(|(w_type, p)| {
+                    p.suspended = false;
+                    w_type.clone()
+                });
+
+            if let Some(w_type) = to_resume {
+                s.log(format!("CPU load healthy ({:.1}% < {:.1}%). Resuming suspended worker {}", cpu, RESTART_CPU_THRESHOLD, w_type));
+                let state_clone = Arc::clone(&state);
+                drop(s);
+                tokio::spawn(async move {
+                    start_worker(state_clone, &w_type).await;
+                });
+                // Continue monitoring — don't return. Sleep briefly to let CPU settle.
+                time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        }
     }
 }
 
@@ -309,11 +379,16 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
         "fetcher" => "./target/release/address_analyzer_rs",
         "neural_scout" => "./target/release/neural_scout_rs",
         "weak_key_scanner" => "./target/release/weak_key_scanner_rs",
+        "treasure_hunter" | "brainwallet" => "python3",
         _ => "./target/release/cryscout_worker_rs",
     };
-    
+
     let mut command = Command::new(worker_binary);
-    if worker_type != "scouter" && worker_type != "neural_scout" {
+    if worker_type == "treasure_hunter" {
+        command.arg("-u").arg("treasure_hunt.py").arg("500");
+    } else if worker_type == "brainwallet" {
+        command.arg("-u").arg("brainwallet_attack.py");
+    } else if worker_type != "scouter" && worker_type != "neural_scout" && worker_type != "weak_key_scanner" {
         command.arg(worker_type);
     }
     
@@ -343,6 +418,8 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
             RestartPolicy {
                 consecutive_failures: 0,
                 next_restart_at: 0.0,
+                suspended: false,
+                suspended_at: 0.0,
             },
         );
         s.workers.insert(
@@ -381,10 +458,27 @@ async fn start_worker(state: Arc<RwLock<HubState>>, worker_type: &str) -> Option
 }
 
 async fn update_dashboard_json(state: Arc<RwLock<HubState>>) {
+    // Clean stale worker_status entries (no heartbeat in >5 minutes)
+    if let Ok(conn) = Connection::open(DB_FILE) {
+        let _ = conn.pragma_update(None, "busy_timeout", &5000);
+        let _ = conn.execute(
+            "DELETE FROM worker_status WHERE last_heartbeat < datetime('now', '-300 seconds')",
+            [],
+        );
+    }
+
     let worker_details = get_worker_details().await;
-    let mut s = state.write().await;
-    s.system.refresh_cpu_usage();
-    s.system.refresh_memory();
+    
+    let mut system = System::new_all();
+    system.refresh_cpu_usage();
+    system.refresh_memory();
+    let cpu_usage = system.global_cpu_info().cpu_usage() as f64;
+    let ram_usage = (system.used_memory() as f64 / system.total_memory() as f64) * 100.0;
+
+    let (running, pid, logs) = {
+        let s = state.read().await;
+        (s.running, std::process::id(), s.log_buffer.clone())
+    };
     
     let last_heartbeat = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -392,14 +486,14 @@ async fn update_dashboard_json(state: Arc<RwLock<HubState>>) {
         .unwrap_or(0.0);
 
     let status = HubStatus {
-        running: s.running,
+        running,
         current_task: format!("Hub active: {} workers", worker_details.len()),
-        cpu_usage: s.system.global_cpu_info().cpu_usage() as f64,
-        ram_usage: (s.system.used_memory() as f64 / s.system.total_memory() as f64) * 100.0,
+        cpu_usage,
+        ram_usage,
         last_heartbeat,
         last_update: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-        pid: std::process::id(),
-        logs: s.log_buffer.clone(),
+        pid,
+        logs,
         worker_count: worker_details.len(),
         workers_detailed: worker_details,
     };
@@ -473,17 +567,50 @@ async fn main() -> Result<()> {
     let state = Arc::new(RwLock::new(HubState::new()));
     println!("[{}] CryScout Hub v3.2 starting up...", Local::now().format("%H:%M:%S"));
 
+    // Cleanup any lingering orphans before starting new fleet
+    stop_all(Arc::clone(&state)).await;
+    {
+        let mut s = state.write().await;
+        s.running = true;
+        s.log("Initial fleet spawn...".to_string());
+    }
+
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
-    
+
+    // Start background management loop BEFORE spawning workers so dashboard updates immediately
     let state_clone_bg = Arc::clone(&state);
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
-            check_signals(Arc::clone(&state_clone_bg)).await;
-            reap_workers(Arc::clone(&state_clone_bg)).await;
-            update_dashboard_json(Arc::clone(&state_clone_bg)).await;
+            // Each operation is isolated so a failure in one doesn't kill the loop
+            let sc = Arc::clone(&state_clone_bg);
+            if let Err(e) = tokio::spawn(check_signals(sc)).await {
+                eprintln!("[HUB] check_signals task failed: {}", e);
+            }
+            let sc = Arc::clone(&state_clone_bg);
+            if let Err(e) = tokio::spawn(reap_workers(sc)).await {
+                eprintln!("[HUB] reap_workers task failed: {}", e);
+            }
+            let sc = Arc::clone(&state_clone_bg);
+            if let Err(e) = tokio::spawn(update_dashboard_json(sc)).await {
+                eprintln!("[HUB] update_dashboard_json task failed: {}", e);
+            }
+        }
+    });
+
+    let state_clone_resource = Arc::clone(&state);
+    tokio::spawn(async move {
+        monitor_resource_budget(state_clone_resource).await;
+    });
+
+    // Spawn workers in background so dashboard/signal loops run immediately
+    let state_clone_spawn = Arc::clone(&state);
+    tokio::spawn(async move {
+        for t in WORKER_TYPES {
+            start_worker(Arc::clone(&state_clone_spawn), t).await;
+            time::sleep(Duration::from_millis(STARTUP_STAGGER_MS)).await;
         }
     });
 

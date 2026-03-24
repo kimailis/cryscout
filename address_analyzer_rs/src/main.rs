@@ -16,7 +16,7 @@ mod rpc;
 
 const DB_FILE: &str = "cryscout.db";
 const HEARTBEAT_SECS: u64 = 60;
-const MAX_FETCH_PARALLELISM: usize = 10;
+const MAX_FETCH_PARALLELISM: usize = 1;
 
 const USER_AGENTS: &[&str] = &[
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
@@ -25,14 +25,14 @@ const USER_AGENTS: &[&str] = &[
 ];
 
 #[derive(Debug, Deserialize)]
-struct MempoolTxStatus {
-    block_time: Option<u64>,
+struct BlockchainInfoTx {
+    hash: String,
+    time: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
-struct MempoolTx {
-    txid: String,
-    status: MempoolTxStatus,
+struct BlockchainInfoAddr {
+    txs: Vec<BlockchainInfoTx>,
 }
 
 #[derive(Debug, Serialize)]
@@ -102,22 +102,52 @@ fn get_tracked_addresses(conn: &Connection) -> Result<HashSet<String>> {
     Ok(addrs.into_iter().collect())
 }
 
-async fn fetch_all_prevouts_rpc(rpc: &rpc::BitcoinRpcClient, tx: &Transaction) -> Result<Vec<TxOut>> {
+async fn get_raw_tx_hybrid(rpc: &rpc::BitcoinRpcClient, client: &reqwest::Client, txid: &str) -> Result<String> {
+    // 1. Try local RPC first (fastest if available)
+    if let Ok(raw) = rpc.get_raw_transaction(txid).await {
+        return Ok(raw);
+    }
+
+    // 2. Try Esplora APIs (btcscan.org first, then blockstream.info)
+    for base in ["https://btcscan.org/api", "https://blockstream.info/api"] {
+        let esplora_url = format!("{}/tx/{}/hex", base, txid);
+        if let Ok(resp) = client.get(&esplora_url).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if !text.is_empty() && text.chars().all(|c| c.is_ascii_hexdigit()) {
+                        return Ok(text);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback to blockchain.info
+    let url = format!("https://blockchain.info/rawtx/{}?format=hex", txid);
+    let resp = client.get(url).send().await?;
+    if resp.status().is_success() {
+        Ok(resp.text().await?)
+    } else {
+        Err(anyhow!("Failed to fetch raw tx {} from RPC, blockstream.info, and blockchain.info", txid))
+    }
+}
+
+async fn fetch_all_prevouts_rpc(rpc: &rpc::BitcoinRpcClient, client: &reqwest::Client, tx: &Transaction) -> Result<Vec<TxOut>> {
     let mut prevouts = Vec::new();
     for vin in &tx.input {
-        let prev_tx_hex = rpc.get_raw_transaction(&vin.previous_output.txid.to_string()).await?;
+        let prev_tx_hex = get_raw_tx_hybrid(rpc, client, &vin.previous_output.txid.to_string()).await?;
         let prev_tx: Transaction = deserialize(&hex::decode(prev_tx_hex)?)?;
         prevouts.push(prev_tx.output[vin.previous_output.vout as usize].clone());
     }
     Ok(prevouts)
 }
 
-async fn get_signature_z_rpc(rpc: &rpc::BitcoinRpcClient, tx: &Transaction, vin_idx: usize) -> Result<String> {
+async fn get_signature_z_rpc(rpc: &rpc::BitcoinRpcClient, client: &reqwest::Client, tx: &Transaction, vin_idx: usize) -> Result<String> {
     let mut cache = SighashCache::new(tx);
     let vin = &tx.input[vin_idx];
     
     if !vin.witness.is_empty() {
-        let prevouts = fetch_all_prevouts_rpc(rpc, tx).await?;
+        let prevouts = fetch_all_prevouts_rpc(rpc, client, tx).await?;
         let prevout = &prevouts[vin_idx];
         let script_code = if prevout.script_pubkey.is_v0_p2wpkh() {
             let pkh = &prevout.script_pubkey.as_bytes()[2..22];
@@ -140,7 +170,7 @@ async fn get_signature_z_rpc(rpc: &rpc::BitcoinRpcClient, tx: &Transaction, vin_
         )?;
         Ok(hex::encode(hash))
     } else {
-        let prev_tx_hex = rpc.get_raw_transaction(&vin.previous_output.txid.to_string()).await?;
+        let prev_tx_hex = get_raw_tx_hybrid(rpc, client, &vin.previous_output.txid.to_string()).await?;
         let prev_tx: Transaction = deserialize(&hex::decode(prev_tx_hex)?)?;
         let script_pubkey = &prev_tx.output[vin.previous_output.vout as usize].script_pubkey;
         
@@ -153,7 +183,7 @@ async fn get_signature_z_rpc(rpc: &rpc::BitcoinRpcClient, tx: &Transaction, vin_
     }
 }
 
-async fn process_transaction(rpc: &rpc::BitcoinRpcClient, tx: &Transaction, tracked_addresses: &HashSet<String>, height: Option<u64>) -> Result<usize> {
+async fn process_transaction(rpc: &rpc::BitcoinRpcClient, client: &reqwest::Client, tx: &Transaction, tracked_addresses: &HashSet<String>, height: Option<u64>) -> Result<usize> {
     let mut total_extracted = 0;
     for (vin_idx, vin) in tx.input.iter().enumerate() {
         let mut pubkey = None;
@@ -178,17 +208,28 @@ async fn process_transaction(rpc: &rpc::BitcoinRpcClient, tx: &Transaction, trac
 
         if let Some(pk) = pubkey {
             let pk_bytes = pk.to_bytes();
+            // Skip non-standard pubkeys (multisig redeem scripts etc.)
+            let pk_len = pk_bytes.len();
+            if pk_len != 33 && pk_len != 65 { continue; }
+
             let p2pkh = Address::p2pkh(&pk, Network::Bitcoin).to_string();
             let p2wpkh = Address::p2wpkh(&pk, Network::Bitcoin).map(|a| a.to_string()).ok();
             let p2sh_wpkh = Address::p2shwpkh(&pk, Network::Bitcoin).map(|a| a.to_string()).ok();
 
             let mut matched_addr = None;
-            if tracked_addresses.contains(&p2pkh) { matched_addr = Some(p2pkh); }
-            else if let Some(a) = p2wpkh { if tracked_addresses.contains(&a) { matched_addr = Some(a); } }
-            else if let Some(a) = p2sh_wpkh { if tracked_addresses.contains(&a) { matched_addr = Some(a); } }
+            if tracked_addresses.contains(&p2pkh) {
+                matched_addr = Some(p2pkh);
+            } else if let Some(ref a) = p2wpkh {
+                if tracked_addresses.contains(a) { matched_addr = p2wpkh; }
+            }
+            if matched_addr.is_none() {
+                if let Some(ref a) = p2sh_wpkh {
+                    if tracked_addresses.contains(a) { matched_addr = p2sh_wpkh; }
+                }
+            }
 
             if let Some(addr) = matched_addr {
-                if let Ok(z) = get_signature_z_rpc(rpc, tx, vin_idx).await {
+                if let Ok(z) = get_signature_z_rpc(rpc, client, tx, vin_idx).await {
                     let sig_hex = if !vin.witness.is_empty() {
                         hex::encode(&vin.witness[0])
                     } else {
@@ -218,14 +259,14 @@ async fn process_transaction(rpc: &rpc::BitcoinRpcClient, tx: &Transaction, trac
     Ok(total_extracted)
 }
 
-async fn scan_block(rpc: &rpc::BitcoinRpcClient, height: u64, tracked_addresses: &HashSet<String>) -> Result<usize> {
+async fn scan_block(rpc: &rpc::BitcoinRpcClient, client: &reqwest::Client, height: u64, tracked_addresses: &HashSet<String>) -> Result<usize> {
     let hash = rpc.get_block_hash(height).await?;
     let block_hex = rpc.get_block_raw(&hash).await?;
     let block: bitcoin::Block = deserialize(&hex::decode(block_hex)?)?;
     
     let mut total_extracted = 0;
     for tx in &block.txdata {
-        total_extracted += process_transaction(rpc, tx, tracked_addresses, Some(height)).await?;
+        total_extracted += process_transaction(rpc, client, tx, tracked_addresses, Some(height)).await?;
     }
     Ok(total_extracted)
 }
@@ -252,15 +293,17 @@ fn current_resource_profile() -> (f32, f64) {
 
 fn recommended_fetch_parallelism() -> usize {
     let (cpu, ram) = current_resource_profile();
-    if cpu > 85.0 || ram > 90.0 { 2 }
-    else if cpu > 70.0 || ram > 80.0 { 4 }
+    if cpu > 70.0 || ram > 90.0 { 1 }
+    else if cpu > 60.0 || ram > 85.0 { 2 }
+    else if cpu > 50.0 { 4 }
     else { MAX_FETCH_PARALLELISM }
 }
 
 async fn throttle_for_system_load(task_state: &Arc<RwLock<String>>) {
     let (cpu, ram) = current_resource_profile();
-    let delay = if cpu > 90.0 || ram > 92.0 { Duration::from_secs(10) }
-    else if cpu > 80.0 || ram > 85.0 { Duration::from_secs(4) }
+    let delay = if cpu > 75.0 || ram > 92.0 { Duration::from_secs(12) }
+    else if cpu > 60.0 || ram > 85.0 { Duration::from_secs(6) }
+    else if cpu > 55.0 { Duration::from_secs(2) }
     else { Duration::from_secs(0) };
 
     if !delay.is_zero() {
@@ -271,58 +314,132 @@ async fn throttle_for_system_load(task_state: &Arc<RwLock<String>>) {
     }
 }
 
-async fn analyze_address_hybrid(rpc: &rpc::BitcoinRpcClient, client: Arc<reqwest::Client>, address: String, sem: Arc<Semaphore>) -> Result<Vec<ExtractedSig>> {
+/// Fetch TX list for an address. Tries multiple APIs with fallback.
+async fn get_address_txids_hybrid(client: &reqwest::Client, address: &str, last_seen_txid: Option<&str>) -> Result<Vec<(String, Option<u64>)>> {
+    // Esplora API URLs — try btcscan.org first (fresh, not rate-limited), then blockstream.info
+    let esplora_bases = ["https://btcscan.org/api", "https://blockstream.info/api"];
+    let mempool_urls: Vec<String> = esplora_bases.iter().map(|base| {
+        if let Some(last_txid) = last_seen_txid {
+            format!("{}/address/{}/txs/chain/{}", base, address, last_txid)
+        } else {
+            format!("{}/address/{}/txs", base, address)
+        }
+    }).collect();
+
+    // Try Esplora APIs (btcscan.org first — fresh endpoint, then blockstream.info)
+    for esplora_url in &mempool_urls {
+        sleep(Duration::from_millis(3000 + (rand::random::<u64>() % 2000))).await;
+        let ua = USER_AGENTS.choose(&mut rand::thread_rng()).unwrap();
+        match client.get(esplora_url).header("User-Agent", *ua).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    if let Ok(txs) = resp.json::<Vec<serde_json::Value>>().await {
+                        let results: Vec<(String, Option<u64>)> = txs.iter()
+                            .filter_map(|tx| {
+                                let txid = tx["txid"].as_str()?.to_string();
+                                let time = tx["status"]["block_time"].as_u64();
+                                Some((txid, time))
+                            })
+                            .collect();
+                        if !results.is_empty() {
+                            return Ok(results);
+                        }
+                    }
+                } else if status.as_u16() == 429 {
+                    println!("[RATE] {} 429 for {}, trying next API", esplora_url, address);
+                    sleep(Duration::from_secs(10)).await;
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    // Fallback: blockchain.info
+    sleep(Duration::from_millis(3000 + (rand::random::<u64>() % 2000))).await;
+    let ua = USER_AGENTS.choose(&mut rand::thread_rng()).unwrap();
+    let url = format!("https://blockchain.info/rawaddr/{}?limit=50&offset=0", address);
+    match client.get(&url).header("User-Agent", *ua).send().await {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                if let Ok(addr_data) = resp.json::<BlockchainInfoAddr>().await {
+                    let results: Vec<(String, Option<u64>)> = addr_data.txs.into_iter()
+                        .map(|t| (t.hash, t.time))
+                        .collect();
+                    if !results.is_empty() {
+                        return Ok(results);
+                    }
+                }
+            } else if resp.status().as_u16() == 429 {
+                println!("[RATE] blockchain.info 429 for {}, backing off 30s", address);
+                sleep(Duration::from_secs(30)).await;
+            }
+        }
+        Err(e) => println!("[DEBUG] blockchain.info failed for {}: {}", address, e),
+    }
+
+    Err(anyhow!("All APIs failed for {}", address))
+}
+
+/// Returns (extracted_sigs, fetch_complete). fetch_complete is false if API errors interrupted pagination.
+async fn analyze_address_hybrid(rpc: &rpc::BitcoinRpcClient, client: Arc<reqwest::Client>, address: String, sem: Arc<Semaphore>) -> Result<(Vec<ExtractedSig>, bool)> {
     let _permit = sem.acquire().await?;
-    println!("[INFO] Analyzing address (Hybrid): {}", address);
+    println!("[INFO] Analyzing address: {}", address);
 
     let mut all_extracted = Vec::new();
-    let mut last_txid = None;
-    let mut consecutive_errors = 0u8;
 
     let mut existing_txids = HashSet::new();
-    if let Ok(conn) = Connection::open(DB_FILE) {
+    // Check balance and vulnerability score to set deeper fetching limits
+    let (max_sigs, max_pages) = if let Ok(conn) = Connection::open(DB_FILE) {
         let _ = conn.pragma_update(None, "busy_timeout", &30000);
         if let Ok(mut stmt) = conn.prepare("SELECT txid FROM signatures WHERE address = ?1") {
             if let Ok(txs) = stmt.query_map(params![address], |row| row.get::<_, String>(0)) {
                 existing_txids = txs.flatten().collect();
             }
         }
-    }
-    
-    loop {
-        let url = if let Some(txid) = &last_txid {
-            format!("https://mempool.space/api/address/{}/txs/chain/{}", address, txid)
+        // High-value or high-score addresses get deeper fetching
+        let (balance, score): (f64, f64) = conn.query_row(
+            "SELECT COALESCE(balance, 0), COALESCE(vulnerability_score, 0) FROM addresses WHERE address = ?1",
+            params![address], |r| Ok((r.get(0)?, r.get(1)?))
+        ).unwrap_or((0.0, 0.0));
+
+        if balance > 1.0 || score > 5.0 {
+            println!("[INFO] High-value target {} (balance={:.4}, score={:.1}): deep fetch mode", address, balance, score);
+            (2000usize, 80usize) // Up to 2000 sigs, 80 pages
+        } else if balance > 0.1 || score > 2.0 {
+            (1000, 40) // Medium-value: moderate fetch
         } else {
-            format!("https://mempool.space/api/address/{}/txs/chain", address)
-        };
-        
-        let ua = USER_AGENTS.choose(&mut rand::thread_rng()).unwrap();
-        let resp = client.get(url).header("User-Agent", *ua).send().await?;
-        if !resp.status().is_success() {
-            if resp.status().as_u16() == 429 { sleep(Duration::from_secs(10)).await; continue; }
-            if resp.status().is_server_error() && consecutive_errors < 5 {
-                consecutive_errors += 1;
-                sleep(Duration::from_secs(5 * consecutive_errors as u64)).await;
-                continue;
-            }
-            return Err(anyhow!("address fetch failed for {} with status {}", address, resp.status()));
+            (500, 20) // Default
         }
-        consecutive_errors = 0;
-        let txs = resp.json::<Vec<MempoolTx>>().await?;
+    } else {
+        (500usize, 20usize)
+    };
+
+    let mut last_txid: Option<String> = None;
+    let mut page = 0;
+    let mut fetch_failed = false;
+
+    loop {
+        let txs = match get_address_txids_hybrid(&client, &address, last_txid.as_deref()).await {
+            Ok(t) => t,
+            Err(e) => {
+                println!("[WARN] TX list fetch failed for {}: {}", address, e);
+                fetch_failed = true;
+                break;
+            }
+        };
+
         if txs.is_empty() { break; }
-        
-        last_txid = txs.last().map(|t| t.txid.clone());
 
-        for tx_meta in txs {
-            if existing_txids.contains(&tx_meta.txid) { continue; }
+        // Remember last txid for pagination (blockstream.info chain pagination)
+        last_txid = txs.last().map(|(txid, _)| txid.clone());
 
-            if let Ok(raw_hex) = rpc.get_raw_transaction(&tx_meta.txid).await {
+        for (txid, time) in &txs {
+            if existing_txids.contains(txid) { continue; }
+
+            if let Ok(raw_hex) = get_raw_tx_hybrid(rpc, &client, txid).await {
                 if let Ok(tx) = deserialize::<Transaction>(&hex::decode(raw_hex).unwrap_or_default()) {
                     for (vin_idx, vin) in tx.input.iter().enumerate() {
-                        let prev_tx_hex = rpc.get_raw_transaction(&vin.previous_output.txid.to_string()).await?;
-                        let prev_tx: Transaction = deserialize(&hex::decode(prev_tx_hex)?)?;
-                        let prevout = &prev_tx.output[vin.previous_output.vout as usize];
-                        
                         let mut pubkey = None;
                         if !vin.witness.is_empty() {
                             if let Some(pk_bytes) = vin.witness.last() {
@@ -344,12 +461,16 @@ async fn analyze_address_hybrid(rpc: &rpc::BitcoinRpcClient, client: Arc<reqwest
                         }
 
                         if let Some(pk) = pubkey {
+                            // Skip non-standard pubkeys (multisig redeem scripts etc.)
+                            let pk_len = pk.to_bytes().len();
+                            if pk_len != 33 && pk_len != 65 { continue; }
+
                             let p2pkh = Address::p2pkh(&pk, Network::Bitcoin).to_string();
                             let p2wpkh = Address::p2wpkh(&pk, Network::Bitcoin).map(|a| a.to_string()).ok();
                             let p2sh_wpkh = Address::p2shwpkh(&pk, Network::Bitcoin).map(|a| a.to_string()).ok();
 
                             if p2pkh == address || p2wpkh == Some(address.clone()) || p2sh_wpkh == Some(address.clone()) {
-                                if let Ok(z) = get_signature_z_rpc(rpc, &tx, vin_idx).await {
+                                if let Ok(z) = get_signature_z_rpc(rpc, &client, &tx, vin_idx).await {
                                     let sig_hex = if !vin.witness.is_empty() { hex::encode(&vin.witness[0]) } else { hex::encode(vin.script_sig.as_bytes()) };
                                     if let Some((r, s)) = parse_der(&sig_hex) {
                                         all_extracted.push(ExtractedSig {
@@ -357,7 +478,7 @@ async fn analyze_address_hybrid(rpc: &rpc::BitcoinRpcClient, client: Arc<reqwest
                                             txid: tx.txid().to_string(),
                                             vin: vin_idx as u32,
                                             pubkey: hex::encode(pk.to_bytes()),
-                                            timestamp: tx_meta.status.block_time,
+                                            timestamp: *time,
                                         });
                                     }
                                 }
@@ -367,10 +488,13 @@ async fn analyze_address_hybrid(rpc: &rpc::BitcoinRpcClient, client: Arc<reqwest
                 }
             }
         }
-        if all_extracted.len() > 1000 { break; }
+
+        page += 1;
+        // Dynamic limits based on target value/score
+        if all_extracted.len() > max_sigs || page > max_pages { break; }
         sleep(Duration::from_millis(200)).await;
     }
-    Ok(all_extracted)
+    Ok((all_extracted, !fetch_failed))
 }
 
 #[tokio::main]
@@ -385,23 +509,28 @@ async fn main() -> Result<()> {
     let rpc_clone = Arc::clone(&rpc_client);
     tokio::spawn(async move {
         println!("[START] RPC Block Scanner Loop started.");
+        let mut backoff_secs: u64 = 30;
+        let max_backoff: u64 = 600; // Cap at 10 minutes between retries
         loop {
             match rpc_clone.get_block_count().await {
                 Ok(current_height) => {
+                    backoff_secs = 30; // Reset backoff on success
                     if let Ok(conn) = Connection::open(DB_FILE) {
                         let _ = conn.pragma_update(None, "busy_timeout", &30000);
-                        
+
                         let hist_start = get_global_stat(&conn, "start_historical_block").unwrap_or(None);
                         let hist_end = get_global_stat(&conn, "end_historical_block").unwrap_or(None);
-                        
+
                         if let (Some(start), Some(end)) = (hist_start, hist_end) {
                             if start <= end {
                                 println!("[INFO] Performing historical block scan: {} to {}", start, end);
                                 let tracked = get_tracked_addresses(&conn).unwrap_or_default();
+                                let hist_client = reqwest::Client::new();
                                 for h in start..=end {
-                                    let _ = scan_block(&rpc_clone, h as u64, &tracked).await;
+                                    let _ = scan_block(&rpc_clone, &hist_client, h as u64, &tracked).await;
                                 }
                                 let _ = conn.execute("DELETE FROM global_stats WHERE key IN ('start_historical_block', 'end_historical_block')", []);
+                                sleep(Duration::from_secs(10)).await;
                             }
                         }
 
@@ -411,8 +540,9 @@ async fn main() -> Result<()> {
                         if current_height > last_height as u64 {
                             let end_height = std::cmp::min(current_height, last_height as u64 + 5);
                             println!("[INFO] Scanning blocks from {} to {} (current tip: {})", last_height + 1, end_height, current_height);
+                            let client_inner = reqwest::Client::new();
                             for h in (last_height + 1)..=end_height as i64 {
-                                if let Ok(n) = scan_block(&rpc_clone, h as u64, &tracked).await {
+                                if let Ok(n) = scan_block(&rpc_clone, &client_inner, h as u64, &tracked).await {
                                     if n > 0 { println!("[SUCCESS] Extracted {} sigs from block {}", n, h); }
                                 }
                                 let _ = set_global_stat(&conn, "last_scanned_block", h);
@@ -420,9 +550,15 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                Err(e) => eprintln!("[WARN] RPC block count check failed: {}. RPC may be unavailable.", e),
+                Err(_) => {
+                    // Exponential backoff: don't spam logs when RPC is unavailable
+                    if backoff_secs == 30 {
+                        eprintln!("[WARN] RPC unavailable. Backing off (next retry in {}s).", backoff_secs);
+                    }
+                    backoff_secs = (backoff_secs * 2).min(max_backoff);
+                }
             }
-            sleep(Duration::from_secs(30)).await;
+            sleep(Duration::from_secs(backoff_secs)).await;
         }
     });
 
@@ -444,16 +580,14 @@ async fn main() -> Result<()> {
         
         let mut stmt = conn.prepare("
             SELECT a.address FROM addresses a
-            LEFT JOIN (SELECT address, count(*) as sig_count FROM signatures GROUP BY address) s 
+            LEFT JOIN (SELECT address, count(*) as sig_count FROM signatures GROUP BY address) s
             ON a.address = s.address
-            WHERE (a.status = 'Spent/Active' 
-            OR a.potential_weakness != 'None Identified'
-            OR a.label = 'Lattice Target'
-            OR a.status = 'Target'
-            OR a.transactions > 0)
-            AND (a.sigs_fetched = 0 OR a.sigs_fetched IS NULL OR (a.transactions > 0 AND COALESCE(s.sig_count, 0) < a.transactions))
-            ORDER BY a.transactions DESC, a.balance DESC
-            LIMIT 50
+            WHERE a.balance > 0
+              AND (a.type IS NULL OR a.type NOT LIKE 'P2PK%')
+              AND (a.transactions IS NULL OR a.transactions >= 2)
+              AND (a.sigs_fetched = 0 OR a.sigs_fetched IS NULL OR (a.transactions > 0 AND COALESCE(s.sig_count, 0) < a.transactions))
+            ORDER BY a.sigs_fetched ASC, a.balance DESC, a.vulnerability_score DESC
+            LIMIT 20
             ")?;
         
         let addresses: Vec<String> = stmt.query_map([], |row| row.get(0))?.flatten().collect();
@@ -465,50 +599,66 @@ async fn main() -> Result<()> {
         }
 
         println!("[START] Found {} target addresses to analyze.", addresses.len());
-        if let Ok(mut task) = task_state.write() { *task = format!("Fetching signatures for {} addresses", addresses.len()); }
+        if let Ok(mut task) = task_state.write() { *task = format!("Fetching signatures for {} addresses (sequential)", addresses.len()); }
 
-        let client = Arc::new(reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).timeout(Duration::from_secs(30)).build()?);
-        let parallelism = recommended_fetch_parallelism();
-        if let Ok(mut task) = task_state.write() { *task = format!("Fetching signatures for {} addresses (parallelism {})", addresses.len(), parallelism); }
-        let sem = Arc::new(Semaphore::new(parallelism));
-        
-        let mut tasks = Vec::new();
-        for addr in addresses {
-            let c = Arc::clone(&client);
-            let s = Arc::clone(&sem);
-            let r = Arc::clone(&rpc_client);
-            tasks.push(tokio::spawn(async move { (addr.clone(), analyze_address_hybrid(&r, c, addr, s).await) }));
-        }
+        let client = Arc::new(reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(45)).build()?);
+        let sem = Arc::new(Semaphore::new(1));
 
-        let results = join_all(tasks).await;
-        
+        // Process addresses strictly one-at-a-time to respect API rate limits
         let mut total_sigs = 0;
-        for res in results {
-            if let Ok((addr, Ok(sigs))) = res {
+        for addr in addresses {
+            let sigs_result = analyze_address_hybrid(&rpc_client, Arc::clone(&client), addr.clone(), Arc::clone(&sem)).await;
+            // Mandatory cooldown between addresses
+            sleep(Duration::from_secs(5)).await;
+
+            if let Ok((sigs, fetch_complete)) = sigs_result {
                 if sigs.is_empty() {
-                    let conn = Connection::open(DB_FILE)?;
-                    let _ = conn.pragma_update(None, "busy_timeout", &30000);
-                    let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
+                    if fetch_complete {
+                        let conn = Connection::open(DB_FILE)?;
+                        let _ = conn.pragma_update(None, "busy_timeout", &30000);
+                        // Mark as fetched AND set transactions=1 so we don't re-fetch
+                        // (if it had spendable ECDSA sigs, we would have found them)
+                        let _ = conn.execute(
+                            "UPDATE addresses SET sigs_fetched = 1, transactions = COALESCE(transactions, 1) WHERE address = ?1",
+                            params![addr]
+                        );
+                    } else {
+                        println!("[WARN] Fetch incomplete for {} (API errors), will retry later", addr);
+                    }
                     continue;
                 }
-                println!("[SUCCESS] Extracted {} sigs for {}", sigs.len(), addr);
+                println!("[SUCCESS] Extracted {} sigs for {}{}", sigs.len(), addr,
+                    if fetch_complete { "" } else { " (partial — API errors, will retry)" });
                 total_sigs += sigs.len();
-                
+
                 let conn = Connection::open(DB_FILE)?;
                 let _ = conn.pragma_update(None, "busy_timeout", &30000);
-                for sig in sigs {
+                for sig in &sigs {
                     use num_bigint::BigInt;
                     use num_traits::Num;
                     let r_int = BigInt::from_str_radix(&sig.r, 16).unwrap_or_default().to_str_radix(10);
                     let s_int = BigInt::from_str_radix(&sig.s, 16).unwrap_or_default().to_str_radix(10);
                     let z_int = BigInt::from_str_radix(&sig.z, 16).unwrap_or_default().to_str_radix(10);
-                    
+
                     let _ = conn.execute(
                         "INSERT OR IGNORE INTO signatures (address, r_hex, s_hex, z_hex, r_int, s_int, z_int, txid, vin, pubkey_hex, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                         params![addr, sig.r, sig.s, sig.z, r_int, s_int, z_int, sig.txid, sig.vin, sig.pubkey, sig.timestamp],
                     );
                 }
-                let _ = conn.execute("UPDATE addresses SET sigs_fetched = 1 WHERE address = ?1", params![addr]);
+                if fetch_complete {
+                    // Mark sigs fetched AND reset analyzed + sigs_scanned so the analyzer
+                    // re-scores and the striker re-strikes with the new (larger) sig set
+                    let _ = conn.execute(
+                        "UPDATE addresses SET sigs_fetched = 1, analyzed = 0, sigs_scanned = 0 WHERE address = ?1",
+                        params![addr],
+                    );
+                } else {
+                    // Partial fetch: reset analyzed/scanned for new sigs but don't mark as fully fetched
+                    let _ = conn.execute(
+                        "UPDATE addresses SET analyzed = 0, sigs_scanned = 0 WHERE address = ?1",
+                        params![addr],
+                    );
+                }
             }
         }
         if let Ok(mut task) = task_state.write() { *task = format!("Fetcher sleeping after collecting {} signatures", total_sigs); }

@@ -61,11 +61,9 @@ CryScout reformulates this into a Closest Vector Problem (CVP) and solves it usi
 - **`neural_scout_rs` (Neural Autocorrect)**: Uses neural-guided failure patterns (Timestamp seeding, Low-entropy buffers) to focus brute-force power on the most vulnerable targets.
 
 ### 3.3 Phase II Precision Strike Suite
-- **`physics_engine_rs`**: 
-    - **Chaos Analyzer**: Calculates **Fractal Dimension** via 3D phase space mapping to detect non-random "Strange Attractors" ($D < 1.1$).
-    - **Differential Ratio Scoring**: Identifies stable algebraic ratios indicative of LCGs.
 - **`genotype_rs`**: Population-level clustering to identify shared "RNG DNA" across different wallet families.
 - **`bias_detector_rs`**: ONNX-based inference (FFNN/LSTM) for identifying non-random signature sequences.
+- **`bleichenbacher_fourier`**: Fourier-based attack on biased nonces.
 
 ---
 
@@ -88,9 +86,8 @@ When an address is targeted by the **Striker**, it undergoes the following 6-ste
 | **1/6** | `nonce_relation_rs` | **Algebraic Relations**: Delta/Ratio scanning ($O(N \cdot L)$). |
 | **2/6** | `bias_detector_rs` | **Spectral Analysis**: FFT-based periodicity detection. |
 | **3/6** | `lattice_attack_rs` | **Lattice Strike**: BKZ-20 reduction for biased nonces (HNP). |
-| **4/6** | `physics_engine_rs` | **Chaos Analysis**: Fractal dimension and Attractor detection. |
-| **5/6** | `bleichenbacher_fourier` | **Fourier Solver**: 4-list sum periodicity recovery. |
-| **6/6** | `neural_inference` | **Pattern Match**: Final ONNX-based anomaly prediction. |
+| **4/6** | `bleichenbacher_fourier` | **Fourier Solver**: 4-list sum periodicity recovery. |
+| **5/6** | `neural_inference` | **Pattern Match**: Final ONNX-based anomaly prediction. |
 
 ---
 

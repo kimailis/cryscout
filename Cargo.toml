@@ -9,5 +9,12 @@ members = [
     "cryscout_worker_rs",
     "bleichenbacher_fourier",
     "wallet_scout_rs"
-, "kangaroo_rs", "physics_engine_rs", "genotype_rs", "neural_scout_rs", "weak_key_scanner_rs"]
+, "kangaroo_rs", "genotype_rs", "neural_scout_rs", "weak_key_scanner_rs", "neural_trainer_rs"]
 resolver = "2"
+
+[profile.release]
+lto = false
+codegen-units = 256
+panic = "abort"
+opt-level = 1
+debug = false

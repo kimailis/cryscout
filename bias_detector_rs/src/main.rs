@@ -198,6 +198,136 @@ impl BigIntExt for BigInt {
     }
 }
 
+/// Deterministic anomaly scorer — interprets the 438-dim feature vector directly.
+/// num_sigs controls sample-size confidence: with few sigs, scores are dampened.
+fn deterministic_anomaly_score(feats: &[f32], num_sigs: usize) -> f32 {
+    if feats.len() < 438 { return 0.5; }
+
+    let confidence = if num_sigs <= 2 { 0.0 } else {
+        1.0 - 1.0 / (1.0 + (num_sigs as f64 - 2.0) / 25.0)
+    };
+
+    let mut score = 0.0f64;
+    let mut weight_sum = 0.0f64;
+
+    // 1. Bit distribution bias (features 0..256)
+    {
+        let w = 3.0;
+        let noise_floor = 0.5 / (num_sigs as f64).sqrt();
+        let deviations: Vec<f64> = feats[0..256].iter()
+            .map(|&p| ((p as f64 - 0.5).abs() - noise_floor).max(0.0))
+            .collect();
+        let mean_dev = deviations.iter().sum::<f64>() / 256.0;
+        let max_dev = deviations.iter().cloned().fold(0.0f64, f64::max);
+        let bit_score = (mean_dev * 8.0 + max_dev * 4.0).min(1.0);
+        score += bit_score * w;
+        weight_sum += w;
+    }
+
+    // 2. Byte entropy loss (features 256..288)
+    {
+        let w = 4.0;
+        let max_possible_entropy = (num_sigs.min(256) as f64).log2() / 8.0;
+        let threshold = max_possible_entropy.min(1.0);
+        let entropies: Vec<f64> = feats[256..288].iter().map(|&e| e as f64).collect();
+        let mean_ent = entropies.iter().sum::<f64>() / 32.0;
+        let min_ent = entropies.iter().cloned().fold(1.0f64, f64::min);
+        let ent_loss = (threshold - mean_ent).max(0.0) / threshold.max(0.01);
+        let worst_loss = (threshold - min_ent).max(0.0) / threshold.max(0.01);
+        let ent_score = (ent_loss * 4.0 + worst_loss * 2.0).min(1.0);
+        score += ent_score * w;
+        weight_sum += w;
+    }
+
+    // 3. LSB bias (features 288..304)
+    {
+        let w = 3.5;
+        let mut lsb_score = 0.0;
+        for k in 0..16usize {
+            let observed = feats[288 + k] as f64;
+            let expected = 1.0 / (1 << (k + 1)) as f64;
+            let noise = (expected / num_sigs as f64).sqrt();
+            if expected > 0.0 {
+                let excess = (observed - expected - 2.0 * noise).max(0.0);
+                let ratio = excess / expected;
+                lsb_score += (ratio / 4.0).min(1.0);
+            }
+        }
+        lsb_score /= 16.0;
+        score += lsb_score * w;
+        weight_sum += w;
+    }
+
+    // 4. MSB / short nonce concentration (features 304..320)
+    {
+        let w = 3.5;
+        let short_frac: f64 = feats[304..319].iter().map(|&f| f as f64).sum();
+        let msb_score = (short_frac * 3.0).min(1.0);
+        score += msb_score * w;
+        weight_sum += w;
+    }
+
+    // 5. Chi-squared modular residues (features 352..358)
+    {
+        let w = 2.5;
+        let chi_baseline = (1.0 / num_sigs as f64 * 10.0).min(0.5);
+        let chi_scores: Vec<f64> = feats[352..358].iter()
+            .map(|&c| (c as f64 - chi_baseline).max(0.0))
+            .collect();
+        let mean_chi = chi_scores.iter().sum::<f64>() / 6.0;
+        let max_chi = chi_scores.iter().cloned().fold(0.0f64, f64::max);
+        let chi_score = (mean_chi * 2.0 + max_chi).min(1.0);
+        score += chi_score * w;
+        weight_sum += w;
+    }
+
+    // 6. Autocorrelation (features 358..374)
+    {
+        let w = 3.0;
+        let noise_floor = 1.0 / (num_sigs as f64).sqrt();
+        let autocorrs: Vec<f64> = feats[358..374].iter()
+            .map(|&a| ((a as f64).abs() - noise_floor).max(0.0))
+            .collect();
+        let mean_autocorr = autocorrs.iter().sum::<f64>() / 16.0;
+        let max_autocorr = autocorrs.iter().cloned().fold(0.0f64, f64::max);
+        let auto_score = (mean_autocorr * 5.0 + max_autocorr * 2.0).min(1.0);
+        score += auto_score * w;
+        weight_sum += w;
+    }
+
+    // 7. FFT spectral peaks (features 374..406)
+    {
+        let w = 2.5;
+        let fft_mags: Vec<f64> = feats[374..406].iter().map(|&f| f as f64).collect();
+        let mean_fft = fft_mags.iter().sum::<f64>() / 32.0;
+        let max_fft = fft_mags.iter().cloned().fold(0.0f64, f64::max);
+        let peak_ratio = if mean_fft > 1e-9 { max_fft / mean_fft } else { 0.0 };
+        let fft_score = ((peak_ratio - 1.0).max(0.0) / 10.0 + max_fft * 3.0).min(1.0);
+        score += fft_score * w;
+        weight_sum += w;
+    }
+
+    // 8. Reverse (LSB-side) entropy (features 406..438)
+    {
+        let w = 2.0;
+        let rev_ents: Vec<f64> = feats[406..438].iter().map(|&e| e as f64).collect();
+        let mean_rev = rev_ents.iter().sum::<f64>() / 32.0;
+        let min_rev = rev_ents.iter().cloned().fold(1.0f64, f64::min);
+        let rev_loss = (1.0 - mean_rev).max(0.0);
+        let worst_rev = (1.0 - min_rev).max(0.0);
+        let rev_score = (rev_loss * 4.0 + worst_rev * 2.0).min(1.0);
+        score += rev_score * w;
+        weight_sum += w;
+    }
+
+    let raw_prob = if weight_sum > 0.0 { score / weight_sum } else { 0.0 };
+    let adjusted = 0.5 + (raw_prob - 0.5) * confidence;
+    let k = 8.0;
+    let midpoint = 0.3;
+    let sharpened = 1.0 / (1.0 + (-k * (adjusted - midpoint)).exp());
+    sharpened as f32
+}
+
 fn log(msg: &str) {
     let now = Local::now().format("%Y-%m-%d %H:%M:%S");
     println!("[{}] {}", now, msg);
@@ -233,23 +363,36 @@ fn main() -> Result<()> {
         r_values.push(r);
     }
 
-    if r_values.len() < 2 {
-        log("Not enough signatures for analysis.");
+    if r_values.len() < 5 {
+        log(&format!("Not enough signatures for analysis ({}, need ≥5).", r_values.len()));
         return Ok(());
     }
 
-    if Path::new(FFNN_MODEL_PATH).exists() {
-        log("Running Neural Anomaly Detector (FFNN)...");
-        if let Some(feats) = NonceFeatures::extract(&r_values) {
+    log("Running Statistical Anomaly Detector (Deterministic)...");
+    if let Some(feats) = NonceFeatures::extract(&r_values) {
+        let det_score = deterministic_anomaly_score(&feats, r_values.len());
+        log(&format!("  Deterministic P(vulnerable): {:.4}", det_score));
+
+        if det_score > 0.7 {
+            let severity = if det_score > 0.9 { "CRITICAL" } else { "HIGH" };
+            log(&format!("  [!!!] {} ANOMALY DETECTED — nonce generation is non-random.", severity));
+        } else if det_score > 0.5 {
+            log("  [~] Moderate anomaly signal — borderline, needs more signatures.");
+        } else {
+            log("  [-] No significant anomaly detected.");
+        }
+
+        // Also run ONNX if available, for comparison
+        if Path::new(FFNN_MODEL_PATH).exists() {
+            log("Running ONNX Neural Anomaly Detector (secondary)...");
             let session = Session::builder()?.commit_from_file(FFNN_MODEL_PATH)?;
             let input_tensor = Array2::from_shape_vec((1, FEATURE_DIM), feats)?;
             let outputs = session.run(inputs![input_tensor]?)?;
             let output_tensor = outputs["output"].try_extract_tensor::<f32>()?;
             let prob = output_tensor[[0, 0]];
-            
-            log(&format!("  FFNN P(vulnerable): {:.4}", prob));
-            if prob > 0.8 {
-                log("  [!!!] HIGH ANOMALY DETECTED by Neural Network.");
+            log(&format!("  ONNX P(vulnerable): {:.4}", prob));
+            if (prob - 0.5).abs() < 0.05 {
+                log("  [!] ONNX model appears uncalibrated (output stuck near 0.5). Relying on deterministic scorer.");
             }
         }
     }
