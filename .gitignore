@@ -1,17 +1,40 @@
-dormant_btc.html
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
 __pycache__/
 *.pyc
-.env
+
+# Logs / process state
 *.log
 *.out
 *.pid
+*_log.txt
+*_status.json
 service_status.json
 miner_status.json
 vulnerability_scores.json
-service_startup.log
-hub_orchestra.log
-scanner.log
-analyze.log
-miner.log
+
+# Databases / SQLite runtime state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Generated / temporary analysis output
+temp_*.json
+advanced_results.txt
+
+# Build / dependency output
 target/
 node_modules/
+
+# Local scraped/generated artifacts
+dormant_btc.html
